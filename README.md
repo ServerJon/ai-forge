@@ -18,6 +18,7 @@
 
 Each skill lives in its own folder:
 
+```txt
 ai-forge/
 ├── AGENTS.md                         # Root-level agent conventions
 ├── .agents/                          # Root-level agent files
@@ -53,3 +54,4 @@ ai-forge/
 │       └── prompts/
 │
 └── README.md
+```
