@@ -779,8 +779,39 @@ install_readme_skill() {
   fi
 }
 
+# Validate the output of a recommendation scan. Some CLIs (e.g. claude, agent)
+# exit non-zero AND/OR write their error message into stdout, so a redirected
+# file can look "generated" while actually containing an auth failure.
+# On failure: keep the raw output as <file>.error.md, warn with a fix, and do
+# NOT add a "review this file" note.
+finalize_recommendation() {
+  local label="$1" file="$2" rc="$3" hint="$4" path="${PROJECT_PATH}/$2"
+  local failed=0
+
+  [ "$rc" -ne 0 ] && failed=1
+  if [ ! -s "$path" ]; then
+    failed=1
+  elif grep -qiE 'failed to authenticate|invalid authentication|not authenticated|unauthorized|api error:? *40[0-9]' "$path" 2>/dev/null; then
+    failed=1
+  fi
+
+  if [ "$failed" -eq 1 ]; then
+    local errfile="${file%.md}.error.md"
+    [ -f "$path" ] && mv "$path" "${PROJECT_PATH}/${errfile}" 2>/dev/null
+    warn "${label} failed (CLI exit ${rc}). This is usually an authentication problem."
+    warn "  Fix: ${hint}"
+    [ -f "${PROJECT_PATH}/${errfile}" ] && warn "  Raw output kept at ${PROJECT_PATH}/${errfile}"
+    RAN_COMMANDS+=("${label}: FAILED — see ${errfile}")
+    return 1
+  fi
+
+  RAN_COMMANDS+=("${label}: ${file} generated")
+  SPECIAL_NOTES+=("Review ${path} and re-run install.sh for any suggested skills.")
+  return 0
+}
+
 run_helper_command() {
-  local id="$1"
+  local id="$1" rc
   case "$id" in
     auto-skills)
       if [ "$DRY_RUN" -eq 1 ]; then
@@ -805,9 +836,9 @@ run_helper_command() {
         warn "'agent' CLI not found; skipping Cursor recommendations scan."; return 0
       fi
       info "Scanning Cursor recommendations -> cursor-recommendations.md"
-      ( cd "$PROJECT_PATH" && agent -p "$(cat "${SCRIPT_DIR}/.agents/skills/claude-automation-recommender/SKILL.md" 2>/dev/null || echo '/claude-automation-recommender')" --output-format text > cursor-recommendations.md )
-      RAN_COMMANDS+=("scan-cursor: cursor-recommendations.md generated")
-      SPECIAL_NOTES+=("Review ${PROJECT_PATH}/cursor-recommendations.md and re-run install.sh for any suggested skills.")
+      ( cd "$PROJECT_PATH" && agent -p "$(cat "${SCRIPT_DIR}/.agents/skills/claude-automation-recommender/SKILL.md" 2>/dev/null || echo '/claude-automation-recommender')" --output-format text > cursor-recommendations.md ); rc=$?
+      finalize_recommendation "scan-cursor" "cursor-recommendations.md" "$rc" \
+        "authenticate the Cursor agent CLI (run 'agent login'), then re-run."
       ;;
     scan-claude-recommendations)
       if [ "$DRY_RUN" -eq 1 ]; then
@@ -819,9 +850,9 @@ run_helper_command() {
         warn "'claude' CLI not found; skipping Claude recommendations scan."; return 0
       fi
       info "Scanning Claude recommendations -> claude-recommendations.md"
-      ( cd "$PROJECT_PATH" && claude -p "/claude-automation-recommender" --output-format text > claude-recommendations.md )
-      RAN_COMMANDS+=("scan-claude: claude-recommendations.md generated")
-      SPECIAL_NOTES+=("Review ${PROJECT_PATH}/claude-recommendations.md and re-run install.sh for any suggested skills.")
+      ( cd "$PROJECT_PATH" && claude -p "/claude-automation-recommender" --output-format text > claude-recommendations.md ); rc=$?
+      finalize_recommendation "scan-claude" "claude-recommendations.md" "$rc" \
+        "authenticate the Claude CLI (run 'claude login', or set a valid ANTHROPIC_API_KEY), then re-run."
       ;;
   esac
 }
