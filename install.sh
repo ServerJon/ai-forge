@@ -220,6 +220,11 @@ build_items() {
   if [ -d "${PROJECT_PATH}/.claude" ] || [ -f "${PROJECT_PATH}/CLAUDE.md" ]; then
     add_row "Scan Claude recommendations (claude automation-recommender)" "cmd" "" "scan-claude-recommendations" "" "-1" 0
   fi
+
+  # Copy the ready-to-use MCP server configuration into the project.
+  if [ -f "${SCRIPT_DIR}/assets/MCPs/mcp.json" ]; then
+    add_row "MCP (copy assets/MCPs/mcp.json -> .agents/mcp/)" "cmd" "" "install-mcp" "" "-1" 0
+  fi
 }
 
 build_items
@@ -853,6 +858,26 @@ run_helper_command() {
       ( cd "$PROJECT_PATH" && claude -p "/claude-automation-recommender" --output-format text > claude-recommendations.md ); rc=$?
       finalize_recommendation "scan-claude" "claude-recommendations.md" "$rc" \
         "authenticate the Claude CLI (run 'claude login', or set a valid ANTHROPIC_API_KEY), then re-run."
+      ;;
+    install-mcp)
+      local mcp_src="${SCRIPT_DIR}/assets/MCPs/mcp.json" mcp_dest="${PROJECT_PATH}/.agents/mcp/mcp.json"
+      if [ ! -f "$mcp_src" ]; then
+        warn "MCP config not found at ${mcp_src}; skipping."; return 0
+      fi
+      if [ "$DRY_RUN" -eq 1 ]; then
+        [ -f "$mcp_dest" ] && dry "Would back up existing .agents/mcp/mcp.json -> mcp.json.bak"
+        dry "Would copy MCP config -> ${mcp_dest}"
+        RAN_COMMANDS+=("install-mcp: mcp.json (skipped: dry-run)"); return 0
+      fi
+      mkdir -p "${PROJECT_PATH}/.agents/mcp"
+      if [ -f "$mcp_dest" ]; then
+        cp "$mcp_dest" "${mcp_dest}.bak"
+        warn "Existing .agents/mcp/mcp.json backed up to mcp.json.bak"
+      fi
+      cp "$mcp_src" "$mcp_dest"
+      ok "Installed MCP config -> .agents/mcp/mcp.json"
+      RAN_COMMANDS+=("install-mcp: .agents/mcp/mcp.json")
+      SPECIAL_NOTES+=("Review ${mcp_dest} and remove any MCP servers you don't need; wire it up with the sync-ai skill.")
       ;;
   esac
 }

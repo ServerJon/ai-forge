@@ -247,7 +247,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 ## MCP Server Tools Summary
 
-TODO: review the MCP server tools on this section and remove the sections where we won't use the MCP, for example: if we have no PostgresSQL database for this project, we will remove the section `PostgresSQL MCP Integration`.
+TODO: review the MCP server tools on this section and remove the sections where we won't use the MCP, for example: if we have no PostgresSQL database for this project, we will remove the section `PostgresSQL MCP Integration`. Then, if you have some MCP server tool yet, you should create/update the `mcp.json` file on `.agents/mcp` folder with the MCP server tools. If some MCP requires any extra configuration to do by myself (get an api-key from my account for example), let me know at the end please
 
 ### Chrome DevTools (Advanced Browser Debugging & Performance)
 
@@ -506,6 +506,36 @@ brew services start ollama                            # Ollama (one-time; auto-s
 **When to use**: pulling ticket/issue context, drafting or updating Jira issues from a
 diff or spec, or syncing decisions to Confluence — instead of leaving the editor. Data
 access always respects your existing Atlassian permissions.
+
+### Back4App (Live Parse Backend Operations)
+
+**Server name**: `back4app` (package `@back4app/mcp-server-back4app`, run via `npx`)
+**Transport**: local stdio process.
+**Config**: `.agents/mcp/mcp.json` (source of truth, symlinked to repo-root `.mcp.json`).
+Authenticates with a Back4App **account key** — a personal access token with **full
+read/write/delete access to every app on the account**. Create it in the Back4App
+dashboard (hover username → **Account Keys**) and paste it into `.agents/mcp/mcp.json`.
+
+> ⚠️ The account key is committed to this (private) repo and therefore lives in git
+> history. Use a dedicated, revocable key, prefer a **test app** for destructive work, and
+> rotate the key when a collaborator with repo access leaves. Follow the
+> [`back4app-mcp` skill](.agents/skills/back4app-mcp/SKILL.md) for safe usage.
+
+**Key capabilities**:
+
+- App management: `get_parse_apps`, `get_parse_app`, `create_parse_app`,
+  `set_current_app`, `get_current_app`
+- Backend operations: `call_parse_server_rest_api` — Parse REST wrapper for schema, CRUD,
+  rich queries/aggregation, users/roles/ACL/CLP, files, and Cloud Function invocation
+- Cloud Code & web hosting: `list_cloud_code_and_web_hosting_files`, `get_file_content`,
+  `deploy_cloud_code_files`, `deploy_web_hosting_files`, `activate_web_hosting`
+
+**When to use**: inspecting or querying the **live** GastrOleum backend (real data, class
+schema, CLP/ACL), or deploying Cloud Code without the dashboard. For writing local
+frontend Parse code use `angular-service`; for editing `functions/` locally use
+`cloud-code`. `deploy_cloud_code_files` makes deploys possible from here — treat them as
+production changes (confirm first; the `cloud-code` skill's "deploy is manual" caveat no
+longer holds once this MCP is configured).
 
 ## Enabled Plugins
 
