@@ -1,7 +1,6 @@
 ---
 description: "Senior-engineer code review of a GitLab MR or GitHub PR. Detects the platform, reads the diff, reviews for security/correctness/performance/modern-code, then posts a single review with one anchored comment per finding (labelled ERROR/WARNING/SUGGESTION)."
-name: "MR/PR reviewer"
-tools: ["execute", "read", "search", "todo", "web/fetch"]
+name: mr-pr-reviewer
 ---
 
 # MR/PR reviewer
@@ -45,6 +44,7 @@ The invoker provides an MR/PR reference. Accept any of:
 - A full URL (`https://gitlab.com/group/proj/-/merge_requests/42`, `https://github.com/org/repo/pull/42`)
 - A bare number (`42`) — resolve against the current repo
 - Nothing — review the MR/PR associated with the **current branch**
+- If you don't have any URL, ask for one before stopping
 
 Never invent the identifier. If you cannot resolve one, stop and ask.
 

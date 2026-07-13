@@ -1,16 +1,6 @@
 ---
 description: "Reviews the current project's architecture against any installed architecture skill found in `.agents/skills`. Surfaces anti-patterns, warnings, and improvement suggestions aligned with that skill. When no architecture skill is present, advises how to create one."
-name: "Architecture reviewer"
-tools:
-  [
-    "read",
-    "search/codebase",
-    "search/files",
-    "search/usages",
-    "execute/runInTerminal",
-    "todo",
-    "web/fetch",
-  ]
+name: architecture-reviewer
 ---
 
 # Architecture reviewer

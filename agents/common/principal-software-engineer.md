@@ -1,7 +1,6 @@
 ---
 description: "Provide principal-level software engineering guidance with focus on engineering excellence, technical leadership, and pragmatic implementation."
-name: "Principal software engineer"
-tools: ["read", "search", "execute", "edit", "todo", "web/fetch"]
+name: principal-software-engineer
 ---
 
 # Principal software engineer mode instructions

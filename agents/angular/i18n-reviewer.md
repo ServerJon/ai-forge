@@ -1,17 +1,6 @@
 ---
 name: i18n-reviewer
 description: Reviews the changes for internationalization issues — hardcoded user-facing strings, missing/unparitied translations, key naming, and untranslated aria-label/placeholder text. Covers both @ngx-translate (the project default) and Angular $localize. Use after frontend feature work. Follows the i18n-translate skill.
-tools:
-  [
-    "read",
-    "search/codebase",
-    "search/files",
-    "search/usages",
-    "execute/runInTerminal",
-    "edit/editFiles",
-    "todo",
-    "web/fetch",
-  ]
 ---
 
 # i18n reviewer
