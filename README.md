@@ -46,6 +46,15 @@ chmod +x install.sh
 
 The installer presents a checkbox menu. Select any combination of skills and agents, checks dependencies, then copies the selected `SKILL.md` files into your project's `.agents/` folder and drops a pre-filled `AGENTS.md` at the project root.
 
+Useful flags:
+
+| Flag              | Effect                                                     |
+| ----------------- | ------------------------------------------------------------ |
+| `-p <path>`       | Target project path (skips the interactive prompt)         |
+| `-y`, `--yes`     | Assume "yes" for confirmation prompts                       |
+| `-n`, `--dry-run` | Preview what would be installed without writing anything    |
+| `-h`, `--help`    | Show usage                                                  |
+
 > [!TIP]
 > Run `npx autoskills --dry-run` in your project first to cover common framework skills, then use `install.sh` to layer on the ai-forge extras that autoskills doesn't provide.
 
@@ -74,20 +83,21 @@ ai-forge/
 │   └── angular/                # Angular i18n reviewer
 │
 ├── assets/
-│   └── MCPs/                   # Ready-to-use .mcp.json for MCP server configuration
+│   ├── MCPs/                   # Ready-to-use mcp.json for MCP server configuration
+│   └── test-helper.js          # Shared Playwright helpers (waitForCondition, screenshots, etc.)
 │
 └── skills/                     # Reusable skills (copied to .agents/skills/)
     ├── common/                 # context7-cli, create-mr-pr, create-readme, gh, git-workflow, glab, security-review, sync-ai, sync-ai-doc
     ├── angular/                # Angular conventions
     ├── astro/                  # Astro framework skills (core, i18n, components, pages, testing)
+    ├── back4app-mcp/           # Back4App (Parse Server) MCP operations — data, schema, Cloud Code deploys
     ├── chrome/                 # Chrome DevTools debugging
     ├── hexagonal-architecture/ # Alembic migrations, entity scaffolding, error codes, endpoint docs, testing
     ├── javascript-typescript/  # Jest, Vitest, advanced TypeScript types
     ├── playwright/             # E2E testing, playwright-cli, web design reviewer, webapp testing
     ├── python/                 # pytest conventions
     ├── react/                  # React 17 patterns
-    ├── sql/                    # SQL code review, query optimisation
-    └── typescript/             # TypeScript best practices
+    └── sql/                    # SQL code review, query optimisation
 ```
 
 Skills that have special setup instructions include a `README.md` in their folder (e.g. `skills/angular/`, `skills/hexagonal-architecture/`, `skills/playwright/webapp-testing/`).
@@ -116,6 +126,7 @@ Skills that have special setup instructions include a `README.md` in their folde
 | ------------------------ | --------------------------------------------------------------------------------- |
 | `angular`                | Angular coding conventions                                                        |
 | `astro`                  | Astro core, i18n, new components, pages, testing                                  |
+| `back4app-mcp`           | Back4App (Parse Server) live backend ops — data/schema inspection, Cloud Code & web-hosting deploys via MCP |
 | `chrome`                 | Chrome DevTools debugging with MCP                                                |
 | `hexagonal-architecture` | Alembic migrations, new entities, error codes, endpoint docs, integration testing |
 | `javascript-typescript`  | Jest, Vitest, advanced TypeScript types                                           |
@@ -123,7 +134,6 @@ Skills that have special setup instructions include a `README.md` in their folde
 | `python`                 | pytest patterns                                                                   |
 | `react`                  | React 17 patterns                                                                 |
 | `sql`                    | Code review, query optimisation                                                   |
-| `typescript`             | TypeScript best practices                                                         |
 
 ---
 
@@ -141,7 +151,10 @@ Skills that have special setup instructions include a `README.md` in their folde
 
 ## MCP configuration
 
-`assets/MCPs/.mcp.json` is a ready-to-use MCP server configuration. Copy it to your project root and remove any entries you don't need.
+`assets/MCPs/mcp.json` is a ready-to-use MCP server configuration (Postgres, memory, Docker, Nx). Copy it to your project root as `.mcp.json` and remove any entries you don't need.
+
+> [!NOTE]
+> The `back4app-mcp` skill is a worked example of an MCP-backed skill for a specific app (GastrOleum) — it references companion skills (`angular-service`, `cloud-code`) that live in that app's own repo, not here. Use it as a template for writing your own live-backend MCP skill rather than installing it as-is.
 
 ---
 
@@ -164,5 +177,6 @@ After the install is complete, consider extending your setup with these addition
 ## Resources
 
 - [autoskills](https://github.com/midudev/autoskills) — auto-install community skills from a curated registry
+- [awesome-copilot](https://github.com/github/awesome-copilot) — GitHub's curated collection of Copilot instructions, prompts, and chat modes
 - [AUTO-SKILLS.md](./AUTO-SKILLS.md) — how ai-forge and autoskills relate, gap analysis
 - [AGENTS.template.md](./AGENTS.template.md) — full project AGENTS.md template with all sections
