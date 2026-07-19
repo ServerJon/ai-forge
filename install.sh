@@ -112,18 +112,22 @@ PROJECT_PATH=""
 EXTRA_PROJECT=""
 ASSUME_YES=0
 DRY_RUN=0
+LIST_ALL=0
 
 usage() {
   cat <<EOF
 ${C_BOLD}ai-forge installer${C_RESET}
 
-Usage: ./install.sh -p <project-path> [-e <extra-project>] [-y] [--dry-run]
+Usage: ./install.sh -p <project-path> [-e <extra-project>] [-a] [-y] [--dry-run]
 
   -p <path>       Target project path where skills/agents are installed.
   -e, --extra <p> Extra project to layer on top of ai-forge. Its skills/agents are
                   listed alongside ai-forge's, its MCP config is merged, and its
                   ${AIFORGE_EXTRA_CONFIG} file (if present) is loaded for settings
                   (labels, superseded skills/agents, ...).
+  -a, --list-all  Non-interactive: select ALL available skills/agents (no TTY/menu
+                  needed). Helper commands (auto-skills, MCP, scans) are NOT auto-run.
+                  Combine with -y for fully unattended installs and -n for CI checks.
   -y              Assume "yes" for confirmation prompts.
   -n, --dry-run   Preview the actions without writing anything or running commands.
   -h              Show this help.
@@ -136,6 +140,7 @@ while [ $# -gt 0 ]; do
     -p=*|--path=*) PROJECT_PATH="${1#*=}"; shift ;;
     -e|--extra) EXTRA_PROJECT="${2:-}"; shift 2 ;;
     -e=*|--extra=*) EXTRA_PROJECT="${1#*=}"; shift ;;
+    -a|--list-all) LIST_ALL=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -n|--dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -543,7 +548,26 @@ run_menu() {
   printf '\033[H\033[J'
 }
 
-run_menu
+# Non-interactive selection: check every installable skill/agent leaf. Helper
+# command rows (auto-skills, scans, MCP) are intentionally left unselected so a
+# bulk install never triggers side-effecting commands without an explicit menu.
+select_all_items() {
+  local i n=0
+  for (( i=0; i<${#LBL[@]}; i++ )); do
+    case "${TYPE[$i]}" in
+      skill|agent|readme)
+        if [ "${INSTALLED[$i]}" = "0" ]; then CHECKED[$i]=1; n=$(( n + 1 )); fi ;;
+    esac
+  done
+  info "--list-all: selected ${C_BOLD}${n}${C_RESET} skill/agent item(s) (helper commands not auto-run)."
+  [ "$n" -gt 0 ] || die "Nothing to install — every available skill/agent is already present in the target."
+}
+
+if [ "$LIST_ALL" -eq 1 ]; then
+  select_all_items
+else
+  run_menu
+fi
 
 # -----------------------------------------------------------------------------
 # 4. Resolve selection -> concrete install actions
@@ -1115,6 +1139,120 @@ if [ -f "$AGENTS_TEMPLATE" ]; then
 else
   warn "AGENTS template not found (${AGENTS_TEMPLATE}); skipped AGENTS.md creation."
 fi
+
+# -----------------------------------------------------------------------------
+# 8b. Write the install manifest (.agents/manifest.json)
+# -----------------------------------------------------------------------------
+# Records what was installed, from which source, and at which upstream commit,
+# so a later run can update or uninstall deliberately instead of guessing.
+
+# Minimal JSON string escaper (backslash + double-quote; names/paths only).
+json_escape() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  printf '%s' "$s"
+}
+
+# Classify a source path into a human-readable origin label:
+#   * under this repo         -> "ai-forge"
+#   * under an extra root     -> that root's basename (e.g. "sewan-ai-forge")
+#   * otherwise               -> "unknown"
+source_label_for() {
+  local src="$1" root
+  case "$src" in
+    "$SCRIPT_DIR"|"$SCRIPT_DIR"/*) printf 'ai-forge'; return 0 ;;
+  esac
+  for root in $AIFORGE_EXTRA_ROOTS; do
+    case "$src" in
+      "$root"|"$root"/*) basename "$root"; return 0 ;;
+    esac
+  done
+  printf 'unknown'
+}
+
+# Git commit of a root, or "null" (unquoted JSON) when not a repo.
+git_commit_of() {
+  local root="$1" c
+  c="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || { printf 'null'; return 0; }
+  printf '"%s"' "$c"
+}
+
+write_manifest() {
+  local total=$(( ${#INSTALLED_SKILLS[@]} + ${#INSTALLED_AGENTS[@]} + ${#SEL_README_NAME[@]} ))
+  [ "$total" -gt 0 ] || return 0   # nothing meaningful to record
+
+  local manifest="${PROJECT_PATH}/.agents/manifest.json"
+  local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u)"
+
+  # --- sources array (ai-forge + each extra root) ---
+  local sources root name first=1 src_json="["
+  src_json="${src_json}{\"name\":\"ai-forge\",\"root\":\"$(json_escape "$SCRIPT_DIR")\",\"commit\":$(git_commit_of "$SCRIPT_DIR")}"
+  for root in $AIFORGE_EXTRA_ROOTS; do
+    name="$(basename "$root")"
+    src_json="${src_json},{\"name\":\"$(json_escape "$name")\",\"root\":\"$(json_escape "$root")\",\"commit\":$(git_commit_of "$root")}"
+  done
+  src_json="${src_json}]"
+
+  # --- skills array ---
+  local skills_json="[" i sep=""
+  for i in "${!SEL_SKILL_NAME[@]}"; do
+    [ -n "${SEL_SKILL_NAME[$i]:-}" ] || continue
+    skills_json="${skills_json}${sep}{\"name\":\"$(json_escape "${SEL_SKILL_NAME[$i]}")\",\"source\":\"$(json_escape "$(source_label_for "${SEL_SKILL_SRC[$i]}")")\",\"path\":\"$(json_escape ".agents/skills/${SEL_SKILL_NAME[$i]}")\"}"
+    sep=","
+  done
+  skills_json="${skills_json}]"
+
+  # --- agents array ---
+  local agents_json="[" ; sep=""
+  for i in "${!SEL_AGENT_NAME[@]}"; do
+    [ -n "${SEL_AGENT_NAME[$i]:-}" ] || continue
+    agents_json="${agents_json}${sep}{\"name\":\"$(json_escape "${SEL_AGENT_NAME[$i]}")\",\"source\":\"$(json_escape "$(source_label_for "${SEL_AGENT_SRC[$i]}")")\",\"path\":\"$(json_escape ".agents/agents/${SEL_AGENT_NAME[$i]}.md")\"}"
+    sep=","
+  done
+  agents_json="${agents_json}]"
+
+  # --- remote (README-driven) skills: installed via their own command, so no
+  #     local path is tracked, only name + source ---
+  local remote_json="[" ; sep=""
+  for i in "${!SEL_README_NAME[@]}"; do
+    [ -n "${SEL_README_NAME[$i]:-}" ] || continue
+    remote_json="${remote_json}${sep}{\"name\":\"$(json_escape "${SEL_README_NAME[$i]}")\",\"source\":\"$(json_escape "$(source_label_for "${SEL_README_SRC[$i]}")")\"}"
+    sep=","
+  done
+  remote_json="${remote_json}]"
+
+  # --- commands array (ids of helper commands that were selected) ---
+  local cmds_json="[" ; sep=""
+  for i in "${!SEL_CMD[@]}"; do
+    [ -n "${SEL_CMD[$i]:-}" ] || continue
+    cmds_json="${cmds_json}${sep}\"$(json_escape "${SEL_CMD[$i]}")\""
+    sep=","
+  done
+  cmds_json="${cmds_json}]"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry "Would write install manifest -> ${manifest}"
+    return 0
+  fi
+
+  mkdir -p "${PROJECT_PATH}/.agents"
+  cat > "$manifest" <<JSON
+{
+  "schema": "ai-forge/install-manifest@1",
+  "generatedAt": "${ts}",
+  "target": "$(json_escape "$PROJECT_PATH")",
+  "sources": ${src_json},
+  "skills": ${skills_json},
+  "agents": ${agents_json},
+  "remoteSkills": ${remote_json},
+  "commands": ${cmds_json}
+}
+JSON
+  ok "Wrote install manifest -> .agents/manifest.json"
+}
+
+write_manifest
 
 # -----------------------------------------------------------------------------
 # 9. Summary
