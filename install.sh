@@ -24,30 +24,42 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # -----------------------------------------------------------------------------
-# Optional external configuration
+# Optional external configuration (layering another project on top)
 # -----------------------------------------------------------------------------
-# These env vars let a downstream project (e.g. a company layer that vendors
-# ai-forge as a submodule) reuse this installer as an engine without forking it.
-# All are optional; unset means "behave exactly like stock ai-forge".
+# A downstream project (e.g. a company layer that vendors ai-forge as a submodule)
+# can reuse this installer as an engine without forking it. The easy way is to
+# pass its path with `--extra <path>`: this installer then reads that project's
+# config file, lists its skills/agents alongside ai-forge's, merges its MCP
+# config, and hides any skills/agents the config marks as superseded.
 #
-#   AIFORGE_EXTRA_ROOTS   Space-separated list of additional source roots to
-#                         scan. Each may contain skills/ and/or agents/ in the
-#                         same layout as this repo. Scanned BEFORE this repo, so
-#                         downstream items appear first in the menu.
-#   AIFORGE_EXTRA_LABEL   Label suffix shown next to items from the extra roots
-#                         (e.g. ""). Applied to all extra roots.
-#   AIFORGE_SELF_LABEL    Label suffix shown next to items from THIS repo
-#                         (e.g. " (shared)").
-#   AIFORGE_HIDE_SKILLS   Space-separated skill names to hide when they come
-#                         from THIS repo (i.e. superseded by a downstream skill).
-#   AIFORGE_MCP_OVERLAY   Space-separated extra mcp.json files to merge into the
-#                         target MCP config (needs jq; falls back to a copy).
-#   AIFORGE_AGENTS_TEMPLATE  Path to an AGENTS.md template overriding the bundled
-#                            AGENTS.template.md.
+# The config file lives at "<extra-project>/${AIFORGE_EXTRA_CONFIG}" and is a
+# plain shell snippet that sets any of the AIFORGE_* variables below. Advanced
+# users can also set these variables directly in the environment.
+#
+#   AIFORGE_EXTRA_ROOTS      Space-separated extra source roots to scan (each with
+#                            skills/ and/or agents/). Scanned BEFORE this repo, so
+#                            downstream items appear first in the menu. `--extra`
+#                            adds the given project here automatically.
+#   AIFORGE_EXTRA_LABEL      Label suffix shown next to items from the extra roots.
+#   AIFORGE_SELF_LABEL       Label suffix shown next to items from THIS repo
+#                            (e.g. " (shared)").
+#   AIFORGE_HIDE_SKILLS      Space-separated skill names to hide when they come
+#                            from THIS repo (superseded by a downstream skill).
+#   AIFORGE_HIDE_AGENTS      Space-separated agent names to hide when they come
+#                            from THIS repo (superseded by a downstream agent).
+#   AIFORGE_MCP_OVERLAY      Space-separated extra mcp.json files to merge into the
+#                            target MCP config (needs jq; falls back to a copy).
+#                            `--extra` adds the project's assets/MCPs/mcp.json here.
+#   AIFORGE_AGENTS_TEMPLATE  Path to an AGENTS.md template overriding the bundled one.
+
+# Name of the per-project config file that `--extra` looks for.
+AIFORGE_EXTRA_CONFIG=".ai-forge.env"
+
 AIFORGE_EXTRA_ROOTS="${AIFORGE_EXTRA_ROOTS:-}"
 AIFORGE_EXTRA_LABEL="${AIFORGE_EXTRA_LABEL:-}"
 AIFORGE_SELF_LABEL="${AIFORGE_SELF_LABEL:-}"
 AIFORGE_HIDE_SKILLS="${AIFORGE_HIDE_SKILLS:-}"
+AIFORGE_HIDE_AGENTS="${AIFORGE_HIDE_AGENTS:-}"
 AIFORGE_MCP_OVERLAY="${AIFORGE_MCP_OVERLAY:-}"
 AIFORGE_AGENTS_TEMPLATE="${AIFORGE_AGENTS_TEMPLATE:-}"
 
@@ -97,6 +109,7 @@ add_row() {
 # Argument parsing
 # -----------------------------------------------------------------------------
 PROJECT_PATH=""
+EXTRA_PROJECT=""
 ASSUME_YES=0
 DRY_RUN=0
 
@@ -104,12 +117,16 @@ usage() {
   cat <<EOF
 ${C_BOLD}ai-forge installer${C_RESET}
 
-Usage: ./install.sh -p <project-path> [-y] [--dry-run]
+Usage: ./install.sh -p <project-path> [-e <extra-project>] [-y] [--dry-run]
 
-  -p <path>     Target project path where skills/agents are installed.
-  -y            Assume "yes" for confirmation prompts.
-  -n, --dry-run Preview the actions without writing anything or running commands.
-  -h            Show this help.
+  -p <path>       Target project path where skills/agents are installed.
+  -e, --extra <p> Extra project to layer on top of ai-forge. Its skills/agents are
+                  listed alongside ai-forge's, its MCP config is merged, and its
+                  ${AIFORGE_EXTRA_CONFIG} file (if present) is loaded for settings
+                  (labels, superseded skills/agents, ...).
+  -y              Assume "yes" for confirmation prompts.
+  -n, --dry-run   Preview the actions without writing anything or running commands.
+  -h              Show this help.
 EOF
 }
 
@@ -117,6 +134,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -p|--path) PROJECT_PATH="${2:-}"; shift 2 ;;
     -p=*|--path=*) PROJECT_PATH="${1#*=}"; shift ;;
+    -e|--extra) EXTRA_PROJECT="${2:-}"; shift 2 ;;
+    -e=*|--extra=*) EXTRA_PROJECT="${1#*=}"; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -n|--dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -148,6 +167,46 @@ PROJECT_PATH="$(cd "$PROJECT_PATH" && pwd)"   # normalize to absolute
 
 info "Target project: ${C_BOLD}${PROJECT_PATH}${C_RESET}"
 [ "$DRY_RUN" -eq 1 ] && dry "DRY-RUN MODE — no files will be written and no commands will be executed."
+
+# -----------------------------------------------------------------------------
+# 1b. Resolve the extra project (--extra) and load its config
+# -----------------------------------------------------------------------------
+# When --extra is given, the extra project's skills/agents are listed alongside
+# ai-forge's, its MCP config is merged, and its config file supplies settings.
+if [ -n "$EXTRA_PROJECT" ]; then
+  case "$EXTRA_PROJECT" in
+    "~"|"~/"*) EXTRA_PROJECT="${HOME}/${EXTRA_PROJECT#\~/}" ;;
+  esac
+  [ -d "$EXTRA_PROJECT" ] || die "Extra project does not exist or is not a directory: $EXTRA_PROJECT"
+  EXTRA_PROJECT="$(cd "$EXTRA_PROJECT" && pwd)"   # normalize to absolute
+  [ "$EXTRA_PROJECT" != "$PROJECT_PATH" ] || die "Extra project must differ from the target project."
+
+  # Exposed to the config file so it can build paths relative to itself.
+  AIFORGE_EXTRA_ROOT="$EXTRA_PROJECT"
+
+  # Load the extra project's config (a shell snippet setting AIFORGE_* vars).
+  extra_cfg="${EXTRA_PROJECT}/${AIFORGE_EXTRA_CONFIG}"
+  if [ -f "$extra_cfg" ]; then
+    # shellcheck disable=SC1090
+    . "$extra_cfg"
+    info "Loaded extra config: ${C_BOLD}${extra_cfg}${C_RESET}"
+  else
+    warn "No ${AIFORGE_EXTRA_CONFIG} found in ${EXTRA_PROJECT}; using defaults for the extra layer."
+  fi
+
+  # Wire the extra project into the scan roots (prepend if not already present).
+  case " $AIFORGE_EXTRA_ROOTS " in
+    *" $EXTRA_PROJECT "*) : ;;
+    *) AIFORGE_EXTRA_ROOTS="$EXTRA_PROJECT${AIFORGE_EXTRA_ROOTS:+ }$AIFORGE_EXTRA_ROOTS" ;;
+  esac
+
+  # Merge the extra project's MCP config by default (unless the config overrode it).
+  if [ -z "$AIFORGE_MCP_OVERLAY" ] && [ -f "${EXTRA_PROJECT}/assets/MCPs/mcp.json" ]; then
+    AIFORGE_MCP_OVERLAY="${EXTRA_PROJECT}/assets/MCPs/mcp.json"
+  fi
+
+  info "Layering extra project: ${C_BOLD}${EXTRA_PROJECT}${C_RESET}"
+fi
 
 SKILLS_DEST="${PROJECT_PATH}/.agents/skills"
 AGENTS_DEST="${PROJECT_PATH}/.agents/agents"
@@ -185,22 +244,34 @@ skill_is_hidden() {
   return 1
 }
 
+# Is agent <name> hidden (superseded) when it comes from this repo's own root?
+agent_is_hidden() {
+  local name="$1" is_self="$2" hidden
+  [ "$is_self" -eq 1 ] || return 1
+  for hidden in $AIFORGE_HIDE_AGENTS; do
+    [ "$hidden" = "$name" ] && return 0
+  done
+  return 1
+}
+
 # Add every agent found under <root>/agents into the Agents category.
-#   add_agents_from_root <root> <label-suffix> <category-index>
+#   add_agents_from_root <root> <label-suffix> <category-index> <is-self>
 add_agents_from_root() {
-  local root="$1" suffix="$2" cat_idx="$3"
-  local subdir sub file name parent_idx has_agent
+  local root="$1" suffix="$2" cat_idx="$3" is_self="$4"
+  local subdir sub file name parent_idx visible
   [ -d "${root}/agents" ] || return 0
   while IFS= read -r subdir; do
     [ -n "$subdir" ] || continue
     sub="$(basename "$subdir")"
-    # Only add the subfolder if it actually contains .md agent files.
-    has_agent=0
+    # Only add the subfolder if it has at least one non-hidden .md agent file.
+    visible=0
     while IFS= read -r file; do
       [ -n "$file" ] || continue
-      has_agent=1; break
+      name="$(basename "$file" .md)"
+      agent_is_hidden "$name" "$is_self" && continue
+      visible=1; break
     done < <(find "$subdir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
-    [ "$has_agent" -eq 1 ] || continue
+    [ "$visible" -eq 1 ] || continue
 
     add_row "${sub}${suffix}" "sub" "$sub" "" "$subdir" "$cat_idx" 1
     parent_idx=$(( ${#LBL[@]} - 1 ))
@@ -208,6 +279,7 @@ add_agents_from_root() {
     while IFS= read -r file; do
       [ -n "$file" ] || continue
       name="$(basename "$file" .md)"
+      agent_is_hidden "$name" "$is_self" && continue
       add_row "$name" "agent" "$sub" "$name" "$file" "$parent_idx" 2
       if agent_installed "$name"; then INSTALLED[$(( ${#LBL[@]} - 1 ))]=1; fi
     done < <(find "$subdir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
@@ -255,9 +327,9 @@ build_items() {
   add_row "Agents" "cat" "" "" "" "-1" 0
   local agents_cat_idx=$(( ${#LBL[@]} - 1 ))
   for root in $AIFORGE_EXTRA_ROOTS; do
-    add_agents_from_root "$root" "$AIFORGE_EXTRA_LABEL" "$agents_cat_idx"
+    add_agents_from_root "$root" "$AIFORGE_EXTRA_LABEL" "$agents_cat_idx" 0
   done
-  add_agents_from_root "$SCRIPT_DIR" "$AIFORGE_SELF_LABEL" "$agents_cat_idx"
+  add_agents_from_root "$SCRIPT_DIR" "$AIFORGE_SELF_LABEL" "$agents_cat_idx" 1
 
   # ---- Skills (extra roots first, then this repo) -------------------------
   add_row "Skills" "cat" "" "" "" "-1" 0
