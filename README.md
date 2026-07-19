@@ -48,15 +48,54 @@ The installer presents a checkbox menu. Select any combination of skills and age
 
 Useful flags:
 
-| Flag              | Effect                                                     |
-| ----------------- | ------------------------------------------------------------ |
-| `-p <path>`       | Target project path (skips the interactive prompt)         |
-| `-y`, `--yes`     | Assume "yes" for confirmation prompts                       |
-| `-n`, `--dry-run` | Preview what would be installed without writing anything    |
-| `-h`, `--help`    | Show usage                                                  |
+| Flag                | Effect                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| `-p <path>`         | Target project path (skips the interactive prompt)                                 |
+| `-e`, `--extra <p>` | Layer another project on top (see [below](#layering-another-project-on-top---extra)) |
+| `-a`, `--list-all`  | Non-interactive: select **all** available skills/agents (no TTY/menu needed)       |
+| `-y`, `--yes`       | Assume "yes" for confirmation prompts                                              |
+| `-n`, `--dry-run`   | Preview what would be installed without writing anything                           |
+| `-h`, `--help`      | Show usage                                                                          |
 
 > [!TIP]
 > Run `npx autoskills --dry-run` in your project first to cover common framework skills, then use `install.sh` to layer on the ai-forge extras that autoskills doesn't provide.
+
+### Non-interactive install (`--list-all`)
+
+`--list-all` skips the interactive menu and selects **every** available skill and
+agent — handy for scripted setups and CI (no TTY required). Helper commands
+(autoskills, MCP merge, recommendation scans) are **not** auto-run; select those
+from the menu when you want them.
+
+```bash
+# Install everything, unattended
+./install.sh -p /path/to/project --list-all -y
+
+# CI smoke test: verify the plan without writing anything
+./install.sh -p /tmp/aiforge-ci --list-all --dry-run
+```
+
+### Install manifest
+
+Every real install writes `<target>/.agents/manifest.json` recording what was
+installed, from which **source** (`ai-forge` or an `--extra` layer), and the
+upstream **commit** of each source. This makes later updates/uninstalls
+deliberate rather than guesswork.
+
+```json
+{
+  "schema": "ai-forge/install-manifest@1",
+  "generatedAt": "2026-07-19T14:00:00Z",
+  "target": "/path/to/project",
+  "sources": [
+    { "name": "ai-forge", "root": "…/ai-forge", "commit": "2da81ae…" }
+  ],
+  "skills": [ { "name": "gh", "source": "ai-forge", "path": ".agents/skills/gh" } ],
+  "agents": [],
+  "remoteSkills": [],
+  "commands": []
+}
+```
 
 ### Post-install
 
