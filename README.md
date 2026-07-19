@@ -174,6 +174,57 @@ After the install is complete, consider extending your setup with these addition
 
 ---
 
+## Layering another project on top (`--extra`)
+
+You can reuse this installer as an **engine** for a downstream "layer" project — one
+that adds its own skills/agents on top of ai-forge — without forking `install.sh`.
+Pass the layer project's path with `--extra`:
+
+```bash
+./install.sh -p /path/to/target-project --extra /path/to/layer-project
+```
+
+When `--extra <path>` is given, the installer:
+
+1. **Loads the layer's config file** — `<layer>/.ai-forge.env`, a shell snippet that
+   sets any of the `AIFORGE_*` variables below (labels, superseded items, ...).
+2. **Lists the layer's skills** from `<layer>/skills/` alongside ai-forge's.
+3. **Lists the layer's agents** from `<layer>/agents/` alongside ai-forge's.
+4. **Merges MCP configs** — `<layer>/assets/MCPs/mcp.json` is merged with ai-forge's
+   into the target's `.agents/mcp/mcp.json` (deep-merge via `jq`; copy fallback).
+5. **Hides superseded items** — any skill/agent named in `AIFORGE_HIDE_SKILLS` /
+   `AIFORGE_HIDE_AGENTS` is dropped from ai-forge's own list (the layer's version
+   wins). Layer items always appear first.
+
+### `.ai-forge.env` — the layer config file
+
+A plain shell snippet at the layer project's root. All variables are optional; unset
+means stock behaviour. `$AIFORGE_EXTRA_ROOT` is set to the layer path before it loads,
+so you can build paths from it.
+
+| Variable                 | Effect                                                                                        |
+| ------------------------ | --------------------------------------------------------------------------------------------- |
+| `AIFORGE_SELF_LABEL`     | Label suffix next to items from ai-forge itself (e.g. `" (shared)"`).                         |
+| `AIFORGE_EXTRA_LABEL`    | Label suffix next to items from the layer project.                                            |
+| `AIFORGE_HIDE_SKILLS`    | Space-separated ai-forge skill names the layer supersedes (hidden from the menu).             |
+| `AIFORGE_HIDE_AGENTS`    | Space-separated ai-forge agent names the layer supersedes.                                     |
+| `AIFORGE_MCP_OVERLAY`    | Extra `mcp.json` file(s) to merge (defaults to `<layer>/assets/MCPs/mcp.json`).               |
+| `AIFORGE_AGENTS_TEMPLATE`| Path to an `AGENTS.md` template overriding the bundled one.                                    |
+| `AIFORGE_EXTRA_ROOTS`    | Extra source roots to scan (advanced; `--extra` adds the layer path automatically).           |
+
+Example `.ai-forge.env`:
+
+```bash
+# ai-forge layer config
+AIFORGE_SELF_LABEL=" (shared)"     # tag ai-forge's own items in the menu
+AIFORGE_HIDE_SKILLS="git-workflow"  # this layer's gitlab-workflow supersedes it
+```
+
+> These variables can also be exported directly in the environment for advanced/CI
+> use; `--extra` is just the convenient path-driven front-end that populates them.
+
+---
+
 ## Resources
 
 - [autoskills](https://github.com/midudev/autoskills) — auto-install community skills from a curated registry
