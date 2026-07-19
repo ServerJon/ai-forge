@@ -174,6 +174,37 @@ After the install is complete, consider extending your setup with these addition
 
 ---
 
+## Embedding ai-forge in another project
+
+You can vendor this repo (e.g. as a git submodule) and reuse `install.sh` as an
+**engine** for a downstream "layer" project — one that adds its own skills/agents on
+top — without forking the installer. Point the following environment variables at the
+downstream project when invoking `install.sh`; all are optional and default to stock
+behaviour when unset:
+
+| Variable                 | Effect                                                                                       |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| `AIFORGE_EXTRA_ROOTS`    | Space-separated extra source roots to scan (each with `skills/` and/or `agents/`). Listed **before** this repo's items in the menu. |
+| `AIFORGE_EXTRA_LABEL`    | Label suffix shown next to items from the extra roots.                                       |
+| `AIFORGE_SELF_LABEL`     | Label suffix shown next to items from this repo (e.g. `" (shared)"`).                        |
+| `AIFORGE_HIDE_SKILLS`    | Space-separated skill names to hide when they come from **this** repo (superseded downstream). |
+| `AIFORGE_MCP_OVERLAY`    | Space-separated extra `mcp.json` files to merge into the target MCP config (needs `jq`; falls back to copying the base config). |
+| `AIFORGE_AGENTS_TEMPLATE`| Path to an `AGENTS.md` template overriding the bundled `AGENTS.template.md`.                 |
+
+Example thin wrapper in the downstream repo:
+
+```bash
+#!/usr/bin/env bash
+DIR="$(cd "$(dirname "$0")" && pwd)"
+AIFORGE_EXTRA_ROOTS="$DIR" \
+AIFORGE_SELF_LABEL=" (shared)" \
+AIFORGE_HIDE_SKILLS="git-workflow" \
+AIFORGE_MCP_OVERLAY="$DIR/assets/MCPs/mcp.json" \
+  exec bash "$DIR/vendor/ai-forge/install.sh" "$@"
+```
+
+---
+
 ## Resources
 
 - [autoskills](https://github.com/midudev/autoskills) — auto-install community skills from a curated registry

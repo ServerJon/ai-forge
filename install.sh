@@ -24,6 +24,34 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # -----------------------------------------------------------------------------
+# Optional external configuration
+# -----------------------------------------------------------------------------
+# These env vars let a downstream project (e.g. a company layer that vendors
+# ai-forge as a submodule) reuse this installer as an engine without forking it.
+# All are optional; unset means "behave exactly like stock ai-forge".
+#
+#   AIFORGE_EXTRA_ROOTS   Space-separated list of additional source roots to
+#                         scan. Each may contain skills/ and/or agents/ in the
+#                         same layout as this repo. Scanned BEFORE this repo, so
+#                         downstream items appear first in the menu.
+#   AIFORGE_EXTRA_LABEL   Label suffix shown next to items from the extra roots
+#                         (e.g. ""). Applied to all extra roots.
+#   AIFORGE_SELF_LABEL    Label suffix shown next to items from THIS repo
+#                         (e.g. " (shared)").
+#   AIFORGE_HIDE_SKILLS   Space-separated skill names to hide when they come
+#                         from THIS repo (i.e. superseded by a downstream skill).
+#   AIFORGE_MCP_OVERLAY   Space-separated extra mcp.json files to merge into the
+#                         target MCP config (needs jq; falls back to a copy).
+#   AIFORGE_AGENTS_TEMPLATE  Path to an AGENTS.md template overriding the bundled
+#                            AGENTS.template.md.
+AIFORGE_EXTRA_ROOTS="${AIFORGE_EXTRA_ROOTS:-}"
+AIFORGE_EXTRA_LABEL="${AIFORGE_EXTRA_LABEL:-}"
+AIFORGE_SELF_LABEL="${AIFORGE_SELF_LABEL:-}"
+AIFORGE_HIDE_SKILLS="${AIFORGE_HIDE_SKILLS:-}"
+AIFORGE_MCP_OVERLAY="${AIFORGE_MCP_OVERLAY:-}"
+AIFORGE_AGENTS_TEMPLATE="${AIFORGE_AGENTS_TEMPLATE:-}"
+
+# -----------------------------------------------------------------------------
 # Terminal helpers
 # -----------------------------------------------------------------------------
 if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ -n "${TERM:-}" ]; then
@@ -145,69 +173,99 @@ extract_code_block() {
 # -----------------------------------------------------------------------------
 # 2. Build the installable item tree
 # -----------------------------------------------------------------------------
-build_items() {
-  local sub subdir name file dir parent_idx
 
-  # ---- Agents -------------------------------------------------------------
+# Is skill <name> hidden (superseded) when it comes from this repo's own root?
+# Only THIS repo's items are hidden; items from extra roots always show.
+skill_is_hidden() {
+  local name="$1" is_self="$2" hidden
+  [ "$is_self" -eq 1 ] || return 1
+  for hidden in $AIFORGE_HIDE_SKILLS; do
+    [ "$hidden" = "$name" ] && return 0
+  done
+  return 1
+}
+
+# Add every agent found under <root>/agents into the Agents category.
+#   add_agents_from_root <root> <label-suffix> <category-index>
+add_agents_from_root() {
+  local root="$1" suffix="$2" cat_idx="$3"
+  local subdir sub file name parent_idx has_agent
+  [ -d "${root}/agents" ] || return 0
+  while IFS= read -r subdir; do
+    [ -n "$subdir" ] || continue
+    sub="$(basename "$subdir")"
+    # Only add the subfolder if it actually contains .md agent files.
+    has_agent=0
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      has_agent=1; break
+    done < <(find "$subdir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
+    [ "$has_agent" -eq 1 ] || continue
+
+    add_row "${sub}${suffix}" "sub" "$sub" "" "$subdir" "$cat_idx" 1
+    parent_idx=$(( ${#LBL[@]} - 1 ))
+
+    while IFS= read -r file; do
+      [ -n "$file" ] || continue
+      name="$(basename "$file" .md)"
+      add_row "$name" "agent" "$sub" "$name" "$file" "$parent_idx" 2
+      if agent_installed "$name"; then INSTALLED[$(( ${#LBL[@]} - 1 ))]=1; fi
+    done < <(find "$subdir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
+  done < <(find "${root}/agents" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+}
+
+# Add every skill found under <root>/skills into the Skills category.
+#   add_skills_from_root <root> <label-suffix> <category-index> <is-self>
+add_skills_from_root() {
+  local root="$1" suffix="$2" cat_idx="$3" is_self="$4"
+  local subdir sub dir sd name parent_idx
+  [ -d "${root}/skills" ] || return 0
+  while IFS= read -r subdir; do
+    [ -n "$subdir" ] || continue
+    sub="$(basename "$subdir")"
+
+    # Collect skill directories (those containing a SKILL.md) under this sub.
+    local skill_dirs=()
+    while IFS= read -r dir; do
+      [ -n "$dir" ] || continue
+      skill_dirs+=("$dir")
+    done < <(find "$subdir" -type f -name 'SKILL.md' -exec dirname {} \; 2>/dev/null | sort -u)
+
+    if [ "${#skill_dirs[@]}" -gt 0 ]; then
+      # Normal subfolder with one or more SKILL.md leaves.
+      add_row "${sub}${suffix}" "sub" "$sub" "" "$subdir" "$cat_idx" 1
+      parent_idx=$(( ${#LBL[@]} - 1 ))
+      for sd in "${skill_dirs[@]}"; do
+        name="$(basename "$sd")"
+        skill_is_hidden "$name" "$is_self" && continue
+        add_row "$name" "skill" "$sub" "$name" "$sd" "$parent_idx" 2
+        if skill_installed "$name"; then INSTALLED[$(( ${#LBL[@]} - 1 ))]=1; fi
+      done
+    elif [ -f "${subdir}/README.md" ]; then
+      # "Remote" skill bundle installed via a README command (e.g. angular).
+      add_row "${sub}${suffix} ${C_DIM}(via README command)${C_RESET}" "readme" "$sub" "$sub" "$subdir" "$cat_idx" 1
+    fi
+  done < <(find "${root}/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+}
+
+build_items() {
+  local root
+
+  # ---- Agents (extra roots first, then this repo) -------------------------
   add_row "Agents" "cat" "" "" "" "-1" 0
   local agents_cat_idx=$(( ${#LBL[@]} - 1 ))
+  for root in $AIFORGE_EXTRA_ROOTS; do
+    add_agents_from_root "$root" "$AIFORGE_EXTRA_LABEL" "$agents_cat_idx"
+  done
+  add_agents_from_root "$SCRIPT_DIR" "$AIFORGE_SELF_LABEL" "$agents_cat_idx"
 
-  if [ -d "${SCRIPT_DIR}/agents" ]; then
-    while IFS= read -r subdir; do
-      [ -n "$subdir" ] || continue
-      sub="$(basename "$subdir")"
-      # Only add the subfolder if it actually contains .md agent files.
-      local has_agent=0
-      while IFS= read -r file; do
-        [ -n "$file" ] || continue
-        has_agent=1; break
-      done < <(find "$subdir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
-      [ "$has_agent" -eq 1 ] || continue
-
-      add_row "$sub" "sub" "$sub" "" "$subdir" "$agents_cat_idx" 1
-      parent_idx=$(( ${#LBL[@]} - 1 ))
-
-      while IFS= read -r file; do
-        [ -n "$file" ] || continue
-        name="$(basename "$file" .md)"
-        add_row "$name" "agent" "$sub" "$name" "$file" "$parent_idx" 2
-        if agent_installed "$name"; then INSTALLED[$(( ${#LBL[@]} - 1 ))]=1; fi
-      done < <(find "$subdir" -maxdepth 1 -type f -name '*.md' 2>/dev/null | sort)
-    done < <(find "${SCRIPT_DIR}/agents" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
-  fi
-
-  # ---- Skills -------------------------------------------------------------
+  # ---- Skills (extra roots first, then this repo) -------------------------
   add_row "Skills" "cat" "" "" "" "-1" 0
   local skills_cat_idx=$(( ${#LBL[@]} - 1 ))
-
-  if [ -d "${SCRIPT_DIR}/skills" ]; then
-    while IFS= read -r subdir; do
-      [ -n "$subdir" ] || continue
-      sub="$(basename "$subdir")"
-
-      # Collect skill directories (those containing a SKILL.md) under this sub.
-      local skill_dirs=()
-      while IFS= read -r dir; do
-        [ -n "$dir" ] || continue
-        skill_dirs+=("$dir")
-      done < <(find "$subdir" -type f -name 'SKILL.md' -exec dirname {} \; 2>/dev/null | sort -u)
-
-      if [ "${#skill_dirs[@]}" -gt 0 ]; then
-        # Normal subfolder with one or more SKILL.md leaves.
-        add_row "$sub" "sub" "$sub" "" "$subdir" "$skills_cat_idx" 1
-        parent_idx=$(( ${#LBL[@]} - 1 ))
-        local sd
-        for sd in "${skill_dirs[@]}"; do
-          name="$(basename "$sd")"
-          add_row "$name" "skill" "$sub" "$name" "$sd" "$parent_idx" 2
-          if skill_installed "$name"; then INSTALLED[$(( ${#LBL[@]} - 1 ))]=1; fi
-        done
-      elif [ -f "${subdir}/README.md" ]; then
-        # "Remote" skill bundle installed via a README command (e.g. angular).
-        add_row "$sub ${C_DIM}(via README command)${C_RESET}" "readme" "$sub" "$sub" "$subdir" "$skills_cat_idx" 1
-      fi
-    done < <(find "${SCRIPT_DIR}/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
-  fi
+  for root in $AIFORGE_EXTRA_ROOTS; do
+    add_skills_from_root "$root" "$AIFORGE_EXTRA_LABEL" "$skills_cat_idx" 0
+  done
+  add_skills_from_root "$SCRIPT_DIR" "$AIFORGE_SELF_LABEL" "$skills_cat_idx" 1
 
   # ---- Helper commands ----------------------------------------------------
   add_row "Run \`auto-skills\` on the project (npx autoskills)" "cmd" "" "auto-skills" "" "-1" 0
@@ -221,9 +279,13 @@ build_items() {
     add_row "Scan Claude recommendations (claude automation-recommender)" "cmd" "" "scan-claude-recommendations" "" "-1" 0
   fi
 
-  # Copy the ready-to-use MCP server configuration into the project.
-  if [ -f "${SCRIPT_DIR}/assets/MCPs/mcp.json" ]; then
-    add_row "MCP (copy assets/MCPs/mcp.json -> .agents/mcp/)" "cmd" "" "install-mcp" "" "-1" 0
+  # Copy/merge the ready-to-use MCP server configuration into the project.
+  if [ -f "${SCRIPT_DIR}/assets/MCPs/mcp.json" ] || [ -n "$AIFORGE_MCP_OVERLAY" ]; then
+    if [ -n "$AIFORGE_MCP_OVERLAY" ]; then
+      add_row "MCP (merge base + overlay servers -> .agents/mcp/mcp.json)" "cmd" "" "install-mcp" "" "-1" 0
+    else
+      add_row "MCP (copy assets/MCPs/mcp.json -> .agents/mcp/)" "cmd" "" "install-mcp" "" "-1" 0
+    fi
   fi
 }
 
@@ -860,23 +922,48 @@ run_helper_command() {
         "authenticate the Claude CLI (run 'claude login', or set a valid ANTHROPIC_API_KEY), then re-run."
       ;;
     install-mcp)
-      local mcp_src="${SCRIPT_DIR}/assets/MCPs/mcp.json" mcp_dest="${PROJECT_PATH}/.agents/mcp/mcp.json"
-      if [ ! -f "$mcp_src" ]; then
-        warn "MCP config not found at ${mcp_src}; skipping."; return 0
+      local mcp_dest="${PROJECT_PATH}/.agents/mcp/mcp.json"
+
+      # Assemble the ordered list of MCP sources: this repo's base config first,
+      # then any overlays (later overlays win on key clashes).
+      local mcp_srcs=()
+      [ -f "${SCRIPT_DIR}/assets/MCPs/mcp.json" ] && mcp_srcs+=("${SCRIPT_DIR}/assets/MCPs/mcp.json")
+      local overlay
+      for overlay in $AIFORGE_MCP_OVERLAY; do
+        [ -f "$overlay" ] && mcp_srcs+=("$overlay")
+      done
+      if [ "${#mcp_srcs[@]}" -eq 0 ]; then
+        warn "No MCP config found (base or overlay); skipping."; return 0
       fi
+
       if [ "$DRY_RUN" -eq 1 ]; then
         [ -f "$mcp_dest" ] && dry "Would back up existing .agents/mcp/mcp.json -> mcp.json.bak"
-        dry "Would copy MCP config -> ${mcp_dest}"
+        dry "Would merge MCP servers from: ${mcp_srcs[*]} -> ${mcp_dest}"
+        [ "${#mcp_srcs[@]}" -gt 1 ] && ! command -v jq >/dev/null 2>&1 && \
+          warn "jq not found; a real run would copy the base config only and list overlay servers to add by hand."
         RAN_COMMANDS+=("install-mcp: mcp.json (skipped: dry-run)"); return 0
       fi
+
       mkdir -p "${PROJECT_PATH}/.agents/mcp"
       if [ -f "$mcp_dest" ]; then
         cp "$mcp_dest" "${mcp_dest}.bak"
         warn "Existing .agents/mcp/mcp.json backed up to mcp.json.bak"
       fi
-      cp "$mcp_src" "$mcp_dest"
-      ok "Installed MCP config -> .agents/mcp/mcp.json"
-      RAN_COMMANDS+=("install-mcp: .agents/mcp/mcp.json")
+
+      if [ "${#mcp_srcs[@]}" -eq 1 ]; then
+        cp "${mcp_srcs[0]}" "$mcp_dest"
+        ok "Installed MCP config -> .agents/mcp/mcp.json"
+        RAN_COMMANDS+=("install-mcp: .agents/mcp/mcp.json")
+      elif command -v jq >/dev/null 2>&1; then
+        # Deep-merge every source's .mcpServers; later sources win on key clashes.
+        jq -s 'reduce .[] as $f ({}; . * $f.mcpServers) | {mcpServers: .}' "${mcp_srcs[@]}" > "$mcp_dest"
+        ok "Merged MCP servers (${#mcp_srcs[@]} source(s)) -> .agents/mcp/mcp.json"
+        RAN_COMMANDS+=("install-mcp: merged .agents/mcp/mcp.json")
+      else
+        cp "${mcp_srcs[0]}" "$mcp_dest"
+        warn "jq not found — copied the base config only; add overlay servers by hand (install jq to automate: brew install jq)."
+        RAN_COMMANDS+=("install-mcp: .agents/mcp/mcp.json (partial — jq missing)")
+      fi
       SPECIAL_NOTES+=("Review ${mcp_dest} and remove any MCP servers you don't need; wire it up with the sync-ai skill.")
       ;;
   esac
@@ -934,24 +1021,27 @@ done
 # -----------------------------------------------------------------------------
 # 8. Copy AGENTS.template.md -> project AGENTS.md
 # -----------------------------------------------------------------------------
+# Prefer a caller-provided template (AIFORGE_AGENTS_TEMPLATE); else the bundled one.
+AGENTS_TEMPLATE="${AIFORGE_AGENTS_TEMPLATE:-${SCRIPT_DIR}/AGENTS.template.md}"
+
 AGENTS_MD_COPIED=0
-if [ -f "${SCRIPT_DIR}/AGENTS.template.md" ]; then
+if [ -f "$AGENTS_TEMPLATE" ]; then
   dest="${PROJECT_PATH}/AGENTS.md"
   if [ "$DRY_RUN" -eq 1 ]; then
     [ -f "$dest" ] && dry "Would back up existing AGENTS.md -> AGENTS.md.bak"
-    dry "Would copy AGENTS.template.md -> ${dest}"
+    dry "Would copy ${AGENTS_TEMPLATE} -> ${dest}"
     AGENTS_MD_COPIED=1
   else
     if [ -f "$dest" ]; then
       cp "$dest" "${dest}.bak"
       warn "Existing AGENTS.md backed up to AGENTS.md.bak"
     fi
-    cp "${SCRIPT_DIR}/AGENTS.template.md" "$dest"
-    ok "Copied AGENTS.template.md -> AGENTS.md"
+    cp "$AGENTS_TEMPLATE" "$dest"
+    ok "Copied $(basename "$AGENTS_TEMPLATE") -> AGENTS.md"
     AGENTS_MD_COPIED=1
   fi
 else
-  warn "AGENTS.template.md not found in repo; skipped AGENTS.md creation."
+  warn "AGENTS template not found (${AGENTS_TEMPLATE}); skipped AGENTS.md creation."
 fi
 
 # -----------------------------------------------------------------------------
