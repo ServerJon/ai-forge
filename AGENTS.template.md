@@ -537,6 +537,26 @@ frontend Parse code use `angular-service`; for editing `functions/` locally use
 production changes (confirm first; the `cloud-code` skill's "deploy is manual" caveat no
 longer holds once this MCP is configured).
 
+### Figma Dev Mode MCP
+
+**Prefix**: `mcp__figma__*`
+**Transport**: remote HTTP server at `https://mcp.figma.com/mcp` (browser-based OAuth on first use — no secrets in config). Requires a Figma Professional/Organization/Enterprise plan.
+**Config**:
+
+- Cursor → run `/add-plugin figma` in chat (registers as `plugin-figma-figma`; bundles its own `.mcp.json` plus Agent Skills — see below). Authorize on first call.
+- The plugin's skills live under Cursor's global plugin cache (`~/.cursor/plugins/cache/cursor-public/figma/`), **not** under this repo's `.agents/skills/` — they are user-level, not project-level, and are not source-controlled here.
+
+**Key capabilities**:
+
+- `get_design_context` / `get_metadata` / `get_screenshot`: pull component structure, layout, and variables from a Figma frame/file URL
+- `get_code_connect_map` / `add_code_connect_map`: keep generated code mapped to real Figma components
+- `use_figma`: write directly to a Figma canvas (create/edit nodes, variables, components)
+- `generate_diagram`: build flowcharts, ERDs, sequence/state diagrams in FigJam
+
+**Bundled Agent Skills** (invoked automatically as prerequisites — see the plugin's own skill descriptions for triggers): `figma-design-to-code`, `figma-generate-design`, `figma-generate-library`, `figma-generate-diagram`, `figma-code-connect`, `figma-implement-motion`, `figma-swiftui`, `figma-use`, `figma-use-figjam`, `figma-use-motion`, `figma-use-slides`, `figma-create-new-file`.
+
+**When to use**: implementing a Figma design as code, keeping components in sync via Code Connect, or pushing an app screen/section into Figma for design review.
+
 ## Enabled Plugins
 
 TODO: add on this section a sub-section for each plugin that you are using and it's not a hook or MCP server. Here you have an example for a Claude Code plugin:
