@@ -26,7 +26,7 @@ This skill **creates**; the `mr-pr-reviewer` agent **reviews**. They are complem
 ## Conventions & mechanics (delegate, don't duplicate)
 
 - Branching, commit format, PR target branch, and the base body template come from the
-  **`git-workflow`** skill — follow it. PRs/MRs target `dev` unless it's a hotfix to `main`.
+  **`git-workflow`** or **`gitlab-workflow`** skills — follow it. PRs/MRs target `dev` unless it's a hotfix to `main`.
 - GitLab CLI mechanics (heredoc bodies, `--push`, common pitfalls) come from the **`glab`**
   skill. For GitHub, use the `gh` CLI equivalently.
 
@@ -46,7 +46,7 @@ Verify the CLI is authenticated; if not, stop and tell the user exactly what to 
 
 ## Phase 1 — Gather everything the change does
 
-Determine the base branch (default `dev` per `git-workflow`; confirm with the user if the
+Determine the base branch (default `dev` per `git-workflow` or `gitlab-workflow`; confirm with the user if the
 branch was cut from `main`), then collect the full picture so the description is complete —
 not just the latest commit.
 
@@ -147,7 +147,7 @@ Rules for the body:
   Include the rows that match the project's real environments; default to
   Local/Dev/Staging/Production and let the user trim.
 - The MR/PR **title** follows conventional-commit format (`type(scope): description`) per
-  `git-workflow`.
+  `git-workflow` or `gitlab-workflow`.
 
 ## Phase 5 — Create the MR/PR
 
