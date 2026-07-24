@@ -466,6 +466,42 @@ brew services start ollama                            # Ollama (one-time; auto-s
 - When uncertain about Astro API signatures, directives, or integration options
 - Prefer this over fetching docs.astro.build directly — same content, no extra browser call
 
+### Nx MCP (Monorepo Workspace & CI Intelligence)
+
+**Nx MCP Integration**: Use Nx MCP tools when working with:
+
+- Looking up accurate, up-to-date Nx documentation (config options, caching, release, generators)
+- Diagnosing a failing Nx Cloud CI pipeline (failed tasks, terminal output, self-healing fixes)
+- Monitoring currently running Nx TUI tasks and streaming their terminal output
+- Visualizing the project or task graph interactively in the IDE
+
+**Server**: `nx-mcp` (package `nx`, run via `npx nx mcp`; use `npx nx-mcp@latest` for Nx < 21.4), local stdio process.
+**Config**: `.agents/mcp/mcp.json` (source of truth, symlinked to repo-root `.mcp.json`) — already registered as `nx-mcp`. No secrets required.
+**Prefix**: `mcp__nx-mcp__*`
+
+**Runs in minimal mode by default** (hides workspace-analysis and generator tools in favor of token-cheaper CLI-based agent skills — see `nx show projects`, `nx show project <name>`, `nx generate` instead). Minimal-mode tools:
+
+| Tool | Description |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `nx_docs` | Returns documentation sections relevant to a query about Nx configuration and best practices |
+| `nx_current_running_tasks_details` | Lists currently running Nx TUI processes and their task statuses |
+| `nx_current_running_task_output` | Returns terminal output for a specific running task |
+| `nx_visualize_graph` | Opens an interactive project/task graph visualization (requires a running IDE with Nx Console) |
+| `ci_information` | Retrieves Nx Cloud CI pipeline status, failed tasks, and self-healing status for the current branch |
+| `ci_task_output` | Retrieves terminal output for a specific CI task (failed or successful) |
+| `update_self_healing_fix` | Applies or rejects an Nx Cloud self-healing CI fix |
+
+**Extended tools** (only if run with `--no-minimal`, e.g. for clients without skill support): `nx_workspace`, `nx_workspace_path`, `nx_project_details`, `nx_available_plugins`, `nx_generators`, `nx_generator_schema`. Prefer the CLI (`nx show projects`, `nx graph`, `nx generate <generator> --dry-run`) over these when a skill is available.
+
+**Example workflow (CI diagnosis)**:
+
+1. User: "What failed in my last CI run?"
+2. Use: `ci_information()` to get pipeline status and failed task IDs
+3. Use: `ci_task_output(runId: "...")` to pull the failing task's terminal output
+4. Suggest a fix, then optionally `update_self_healing_fix(...)` to record the decision
+
+**When to use over the Nx CLI**: pulling live Nx Cloud CI status/output and self-healing actions, or streaming output from a task already running in the Nx TUI — the CLI cannot reach either. For workspace exploration, project config, or code generation, prefer `nx show ...` / `nx generate ...` directly (or `--no-minimal` tools only if the CLI isn't available to the agent).
+
 ### Greptile (Code Review & Context Analysis)
 
 **Prefix**: `mcp__plugin_greptile_greptile__*`
