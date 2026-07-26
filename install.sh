@@ -98,11 +98,12 @@ PARENT=()     # index of immediate parent, or -1
 DEPTH=()      # indentation depth
 CHECKED=()    # 0 | 1
 INSTALLED=()  # 0 | 1 (already present in target -> not selectable)
+DISABLED=()   # 0 | 1 (shown for visibility but not selectable, e.g. known-broken commands)
 
 add_row() {
   # add_row <label> <type> <sub> <name> <src> <parent> <depth>
   LBL+=("$1"); TYPE+=("$2"); SUB+=("$3"); NAME+=("$4"); SRC+=("$5")
-  PARENT+=("$6"); DEPTH+=("$7"); CHECKED+=(0); INSTALLED+=(0)
+  PARENT+=("$6"); DEPTH+=("$7"); CHECKED+=(0); INSTALLED+=(0); DISABLED+=(0)
 }
 
 # -----------------------------------------------------------------------------
@@ -345,12 +346,18 @@ build_items() {
   add_skills_from_root "$SCRIPT_DIR" "$AIFORGE_SELF_LABEL" "$skills_cat_idx" 1
 
   # ---- Helper commands ----------------------------------------------------
+  # NOTE: "auto-skills" and "Scan Cursor recommendations" are currently known
+  # to misbehave (see project notes). They are kept visible in the menu for
+  # discoverability but marked DISABLED so they can't be (mis)selected here;
+  # the summary reminds the user to run them manually instead.
   add_row "Run \`auto-skills\` on the project (npx autoskills)" "cmd" "" "auto-skills" "" "-1" 0
+  DISABLED[$(( ${#LBL[@]} - 1 ))]=1
 
   # Show recommendation scanners only when the relevant config exists in the
   # target project (per install.md).
   if [ -d "${PROJECT_PATH}/.cursor" ] || [ -f "${PROJECT_PATH}/CLAUDE.md" ]; then
     add_row "Scan Cursor recommendations (agent automation-recommender)" "cmd" "" "scan-cursor-recommendations" "" "-1" 0
+    DISABLED[$(( ${#LBL[@]} - 1 ))]=1
   fi
   if [ -d "${PROJECT_PATH}/.claude" ] || [ -f "${PROJECT_PATH}/CLAUDE.md" ]; then
     add_row "Scan Claude recommendations (claude automation-recommender)" "cmd" "" "scan-claude-recommendations" "" "-1" 0
@@ -386,9 +393,9 @@ is_descendant() {
 # Set row $1 (and all its descendants) to checked-state $2, skipping installed.
 toggle_subtree() {
   local idx="$1" val="$2" j
-  [ "${INSTALLED[$idx]}" = "1" ] || CHECKED[$idx]="$val"
+  if [ "${INSTALLED[$idx]}" = "0" ] && [ "${DISABLED[$idx]}" = "0" ]; then CHECKED[$idx]="$val"; fi
   for (( j=0; j<${#LBL[@]}; j++ )); do
-    if [ "${INSTALLED[$j]}" = "0" ] && is_descendant "$j" "$idx"; then
+    if [ "${INSTALLED[$j]}" = "0" ] && [ "${DISABLED[$j]}" = "0" ] && is_descendant "$j" "$idx"; then
       CHECKED[$j]="$val"
     fi
   done
@@ -404,8 +411,8 @@ recompute_parents() {
         for (( j=0; j<${#LBL[@]}; j++ )); do
           if [ "${PARENT[$j]}" = "$i" ]; then
             has_child=1
-            if [ "${INSTALLED[$j]}" = "1" ]; then
-              :   # installed children count as satisfied
+            if [ "${INSTALLED[$j]}" = "1" ] || [ "${DISABLED[$j]}" = "1" ]; then
+              :   # installed/disabled children count as satisfied
             elif [ "${CHECKED[$j]}" = "0" ]; then
               all_checked=0
             fi
@@ -477,6 +484,9 @@ render_menu() {
     if [ "${INSTALLED[$i]}" = "1" ]; then
       box="${C_GREEN}[✓]${C_RESET}"
       mark=" ${C_DIM}(installed)${C_RESET}"
+    elif [ "${DISABLED[$i]}" = "1" ]; then
+      box="${C_DIM}[-]${C_RESET}"
+      mark=" ${C_DIM}(currently unavailable — run manually, see summary)${C_RESET}"
     else
       if [ "${CHECKED[$i]}" = "1" ]; then
         box="${C_GREEN}[x]${C_RESET}"
@@ -486,7 +496,11 @@ render_menu() {
       mark=""
     fi
 
-    line="${box} ${indent}${LBL[$i]}${mark}"
+    if [ "${DISABLED[$i]}" = "1" ]; then
+      line="${box} ${indent}${C_DIM}${LBL[$i]}${C_RESET}${mark}"
+    else
+      line="${box} ${indent}${LBL[$i]}${mark}"
+    fi
     if [ "$i" -eq "$cursor" ]; then
       printf '%s\n' "${C_BLUE}❯${C_RESET} ${line}"
     else
@@ -523,7 +537,7 @@ run_menu() {
       $'\033[B'|j)  # down
         cursor=$(( cursor + 1 )); [ "$cursor" -ge "${#LBL[@]}" ] && cursor=0 ;;
       ' ')          # toggle
-        if [ "${INSTALLED[$cursor]}" = "1" ]; then
+        if [ "${INSTALLED[$cursor]}" = "1" ] || [ "${DISABLED[$cursor]}" = "1" ]; then
           :
         else
           if [ "${CHECKED[$cursor]}" = "1" ]; then
@@ -534,7 +548,7 @@ run_menu() {
         fi ;;
       a|A)          # select all
         for (( i=0; i<${#LBL[@]}; i++ )); do
-          [ "${INSTALLED[$i]}" = "0" ] && CHECKED[$i]=1
+          [ "${INSTALLED[$i]}" = "0" ] && [ "${DISABLED[$i]}" = "0" ] && CHECKED[$i]=1
         done ;;
       n|N)          # select none
         for (( i=0; i<${#LBL[@]}; i++ )); do CHECKED[$i]=0; done ;;
@@ -1315,6 +1329,18 @@ From your Agent (Claude, Gemini, etc.), run the following prompt to adapt the \`
   ${C_CYAN}> From the \`AGENTS.md\` file, review it and do the instruction on the \`TODO\` sections.${C_RESET}
 EOF
 fi
+
+# Reminder: auto-skills / Cursor recommendations scan are disabled in the menu
+# above (known issue) — point the user at the manual commands instead.
+cat <<EOF
+
+${C_YELLOW}${C_BOLD}Remember:${C_RESET} \`auto-skills\` and the Cursor recommendations scan are temporarily disabled
+in the menu above. To pull in more recommended skills/agents and improve your AI config,
+run both commands yourself in the target project:
+
+  ${C_CYAN}npx autoskills${C_RESET}
+  ${C_CYAN}agent -p "/claude-automation-recommender" --output-format text > cursor-recommendations.md${C_RESET}
+EOF
 
 if [ "$DRY_RUN" -eq 1 ]; then
   printf '\n%s\n' "${C_CYAN}${C_BOLD}Dry-run complete.${C_RESET} Re-run without ${C_BOLD}--dry-run${C_RESET} to apply these changes."
