@@ -185,11 +185,6 @@ A review should not only surface problems.
 > 3. Optionally link reference materials or examples in the skill's `references/`
 >    folder.
 > 4. Re-run this agent once the skill is installed to get a full architecture review.
->
-> If you are unsure which architecture to adopt, consider reviewing the existing
-> skills in the `ai-forge` repository — for example,
-> `skills/hexagonal-architecture/hexagonal-architecture/SKILL.md` — as a starting
-> point.
 
 ---
 
