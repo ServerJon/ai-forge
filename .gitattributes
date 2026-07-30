@@ -1,0 +1,28 @@
+# Normalize line endings so the installers stay runnable on every platform.
+# Without this, Git for Windows (core.autocrlf=true by default) rewrites
+# install.sh with CRLF and bash fails with "bad interpreter: ...bash^M".
+
+* text=auto
+
+# Shell scripts and the payload we copy into projects must keep LF.
+*.sh        text eol=lf
+*.bash      text eol=lf
+
+# PowerShell keeps CRLF: some Windows hosts and signing tooling expect it.
+*.ps1       text eol=crlf
+*.psm1      text eol=crlf
+*.psd1      text eol=crlf
+
+# Markdown/JSON payload is read by agents on every OS; LF avoids noisy diffs.
+*.md        text eol=lf
+*.json      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# Binary assets must never be touched.
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.webp      binary
+*.pdf       binary
