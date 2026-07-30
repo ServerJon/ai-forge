@@ -20,12 +20,17 @@ The skills are AI-runtime agnostic: they follow the `AGENTS.md` / `SKILL.md` con
 
 ### Prerequisites
 
-| Tool              | Why                                      | Check / install                        |
-| ----------------- | ---------------------------------------- | -------------------------------------- |
-| Node.js ≥ 22      | Runs `npx`-based tools                   | `node -v` · `nvm install 22`           |
-| `ctx7` (optional) | Up-to-date library docs inside the agent | `npx ctx7@latest --version`            |
-| `glab` (optional) | GitLab operations skill                  | `brew install glab && glab auth login` |
-| `gh` (optional)   | GitHub operations skill                  | `brew install gh && gh auth login`     |
+| Tool              | Why                                        | Check / install                                                         |
+| ----------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
+| Bash ≥ 3.2        | Runs `install.sh` on Linux/macOS           | preinstalled — on Windows use [`install.ps1`](#windows)                 |
+| Node.js ≥ 22      | Runs `npx`-based tools                     | `node -v` · `nvm install 22`                                            |
+| `jq` (optional)   | Merges MCP configs when layering `--extra` | `brew install jq` · `apt install jq`                                    |
+| `ctx7` (optional) | Up-to-date library docs inside the agent   | `npx ctx7@latest --version`                                             |
+| `glab` (optional) | GitLab operations skill                    | `brew install glab && glab auth login`                                  |
+| `gh` (optional)   | GitHub operations skill                    | `brew install gh && gh auth login`                                      |
+
+Linux and macOS run `install.sh`; Windows runs `install.ps1` natively (WSL 2 and
+Git Bash also work — see [Windows](#windows)).
 
 ### Install skills into a project
 
@@ -60,6 +65,84 @@ Useful flags:
 > [!TIP]
 > Run `npx autoskills --dry-run` in your project first to cover common framework skills, then use `install.sh` to layer on the ai-forge extras that autoskills doesn't provide.
 
+### Windows
+
+Windows has a native installer, `install.ps1`, so no Bash environment is
+required:
+
+```powershell
+# Windows PowerShell 5.1 or PowerShell 7+
+.\install.ps1 -Path C:\src\my-project
+```
+
+It is a port of `install.sh`, not a wrapper: same checkbox menu, same
+dependency tables, same `.agents/` payload, same `manifest.json`. It also
+accepts Git Bash (`/c/src/app`) and WSL (`/mnt/c/src/app`) path spellings, and
+merges MCP configs with the built-in JSON parser so **jq is not needed** on
+Windows. A CI job installs with both scripts and diffs the result, so the two
+stay in step — see [Installer parity](#installer-parity).
+
+| Bash flag        | PowerShell parameter |
+| ---------------- | -------------------- |
+| `-p <path>`      | `-Path <path>`       |
+| `-e <path>`      | `-Extra <path>`      |
+| `-a`             | `-ListAll`           |
+| `-y`             | `-Yes`               |
+| `-n`             | `-DryRun`            |
+| (n/a)            | `-NoColor`           |
+
+The short aliases work too (`.\install.ps1 -p C:\src\app -a -y`), and
+`Get-Help .\install.ps1 -Full` prints the usage.
+
+> [!NOTE]
+> If PowerShell refuses to run the script, unblock it for the current session:
+> `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass`.
+
+#### Windows with WSL 2 or Git Bash
+
+Prefer WSL 2 if you already use it: the shell hooks some skills install (for
+example `sync-ai`'s `.agents/hooks/lint-format.sh`) need a POSIX shell at
+runtime, whatever installed them.
+
+```bash
+wsl --install -d Ubuntu          # PowerShell, once
+# then, inside the Ubuntu shell:
+git clone https://github.com/your-org/ai-forge && cd ai-forge
+./install.sh -p /path/to/your-project
+```
+
+> [!TIP]
+> Keep both the repo and the target project inside the Linux filesystem
+> (`~/projects/...`). Working across `/mnt/c/...` is slow and loses the execute
+> bit on installed hook scripts.
+
+**Git Bash** (bundled with [Git for Windows](https://gitforwindows.org)) also
+works if you would rather run the Bash installer. Mind these four points:
+
+1. **Line endings.** The repository's `.gitattributes` pins `*.sh` to LF, so a
+   fresh clone is safe even with `core.autocrlf=true`. An older clone may still
+   hold CRLF copies, which make Bash fail with
+   `bad interpreter: /usr/bin/env bash^M`; renormalise it once:
+
+   ```bash
+   git rm --cached -r . && git reset --hard
+   ```
+
+2. **No execute bit.** NTFS does not carry it, so invoke the interpreter
+   explicitly instead of `./install.sh`:
+
+   ```bash
+   bash install.sh -p /c/Users/you/projects/your-project
+   ```
+
+3. **Paths must be POSIX-style.** Use `/c/Users/...`, not `C:\Users\...` —
+   backslashes are consumed as escape characters by the shell.
+4. **Run it from Git Bash / Windows Terminal, not from `cmd.exe` or PowerShell.**
+   The checkbox menu reads raw keystrokes and ANSI escape sequences, which is
+   unreliable when `bash.exe` is launched from a non-MSYS console. If the arrow
+   keys misbehave, skip the menu entirely with `--list-all -y` (see the
+   [next section](#non-interactive-install---list-all)).
+
 ### Non-interactive install (`--list-all`)
 
 `--list-all` skips the interactive menu and selects **every** available skill and
@@ -74,6 +157,31 @@ from the menu when you want them.
 # CI smoke test: verify the plan without writing anything
 ./install.sh -p /tmp/aiforge-ci --list-all --dry-run
 ```
+
+```powershell
+# The same two runs on Windows
+.\install.ps1 -Path C:\src\my-project -ListAll -Yes
+.\install.ps1 -Path $env:TEMP\aiforge-ci -ListAll -DryRun
+```
+
+### Installer parity
+
+`install.sh` and `install.ps1` are two hand-maintained implementations of the
+same behaviour, so **a change to one must be made in the other**. Two things
+keep them honest:
+
+```bash
+# Install with both and diff the results (needs bash + pwsh + network)
+./tests/parity/compare-installers.sh
+
+# Unit tests for the PowerShell modules
+pwsh -c "Invoke-Pester ./tests/powershell -Output Detailed"
+```
+
+The `installers` GitHub Actions workflow runs the Bash installer on Linux and
+macOS (including under macOS's Bash 3.2 and through `sh`), the PowerShell
+installer on Linux, macOS, Windows PowerShell 5.1 and PowerShell 7, plus
+PSScriptAnalyzer, Pester and the parity diff.
 
 ### Install manifest
 
@@ -99,7 +207,7 @@ deliberate rather than guesswork.
 
 ### Post-install
 
-After `install.sh` completes, open your AI assistant and run:
+After the installer completes, open your AI assistant and run:
 
 ```
 From the `AGENTS.md` file, review it and complete all TODO sections.
@@ -115,7 +223,12 @@ This customises the generated `AGENTS.md` to your project's specifics.
 ai-forge/
 ├── AGENTS.template.md          # Starter AGENTS.md — copied to target project on install
 ├── AUTO-SKILLS.md              # Reference: autoskills integration and gap analysis
-├── install.sh                  # Interactive skill/agent installer
+├── install.sh                  # Interactive skill/agent installer (Linux/macOS)
+├── install.ps1                 # Same installer, native to Windows PowerShell
+│
+├── scripts/powershell/         # Modules backing install.ps1 (console, catalog, menu, ...)
+├── tests/powershell/           # Pester tests for those modules
+├── tests/parity/               # Diffs a bash install against a PowerShell install
 │
 ├── agents/                     # Agent definitions (copied to .agents/agents/)
 │   ├── common/                 # Architecture reviewer, debugger, MR/PR reviewer, principal engineer

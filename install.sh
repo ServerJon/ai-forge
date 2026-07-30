@@ -18,6 +18,42 @@
 # no mapfile.
 # -----------------------------------------------------------------------------
 
+# The installer relies on bash features (arrays, `read -rsn`, process
+# substitution), so hand over to bash whenever another shell started us:
+#   * `sh install.sh` on Linux runs dash, which lacks those features entirely.
+#   * `sh install.sh` on macOS runs bash in POSIX mode, where the process
+#     substitutions further down are a syntax error.
+#   * `zsh install.sh` behaves like the first case.
+# AIFORGE_REEXEC breaks the loop if the handover lands in a POSIX shell again.
+aiforge_needs_bash=""
+if [ -z "${BASH_VERSION:-}" ]; then
+  aiforge_needs_bash="yes"
+else
+  case ":${SHELLOPTS:-}:" in
+    *:posix:*) aiforge_needs_bash="yes" ;;
+  esac
+fi
+
+if [ -n "$aiforge_needs_bash" ]; then
+  # "$0" is only a path we can re-run when the script came from a file: piping
+  # it into a shell leaves "$0" pointing at the shell binary itself.
+  case "${0:-}" in
+    *.sh) aiforge_self="$0" ;;
+    *) aiforge_self="" ;;
+  esac
+
+  if [ -z "${AIFORGE_REEXEC:-}" ] && [ -n "$aiforge_self" ] && [ -r "$aiforge_self" ] &&
+    command -v bash >/dev/null 2>&1; then
+    AIFORGE_REEXEC=1
+    export AIFORGE_REEXEC
+    exec bash "$aiforge_self" "$@"
+  fi
+  printf 'This installer requires bash. Run it as: bash install.sh -p <project-path>\n' >&2
+  exit 1
+fi
+
+unset aiforge_needs_bash AIFORGE_REEXEC
+
 set -uo pipefail
 
 # Absolute path to this repo (the source of skills/agents).
@@ -77,6 +113,17 @@ if [ -t 1 ] && command -v tput >/dev/null 2>&1 && [ -n "${TERM:-}" ]; then
   C_CYAN="$(tput setaf 6)"
 else
   C_RESET=""; C_BOLD=""; C_DIM=""; C_GREEN=""; C_YELLOW=""; C_BLUE=""; C_RED=""; C_CYAN=""
+fi
+
+# Timeout used when draining the remaining bytes of an escape sequence (arrow
+# keys). Bash 3.2 -- still /bin/bash on macOS -- only accepts whole seconds and
+# aborts the read with "invalid timeout specification" otherwise, which would
+# leak the leftover bytes into the menu as ordinary keystrokes. The 1s fallback
+# is only ever waited out on a bare ESC press; arrow keys arrive in one burst.
+if [ "${BASH_VERSINFO[0]:-3}" -ge 4 ]; then
+  ESC_SEQ_TIMEOUT="0.001"
+else
+  ESC_SEQ_TIMEOUT="1"
 fi
 
 info()  { printf '%s\n' "${C_BLUE}==>${C_RESET} $*"; }
@@ -161,7 +208,9 @@ fi
 
 [ -n "$PROJECT_PATH" ] || die "No project path provided. Re-run with -p <path>. Nothing to install."
 
-# Expand a leading ~ to $HOME.
+# Expand a leading ~ to $HOME. The tildes below are case patterns matched
+# against the literal input, not paths to expand.
+# shellcheck disable=SC2088
 case "$PROJECT_PATH" in
   "~"|"~/"*) PROJECT_PATH="${HOME}/${PROJECT_PATH#\~/}" ;;
 esac
@@ -180,6 +229,7 @@ info "Target project: ${C_BOLD}${PROJECT_PATH}${C_RESET}"
 # When --extra is given, the extra project's skills/agents are listed alongside
 # ai-forge's, its MCP config is merged, and its config file supplies settings.
 if [ -n "$EXTRA_PROJECT" ]; then
+  # shellcheck disable=SC2088
   case "$EXTRA_PROJECT" in
     "~"|"~/"*) EXTRA_PROJECT="${HOME}/${EXTRA_PROJECT#\~/}" ;;
   esac
@@ -188,6 +238,7 @@ if [ -n "$EXTRA_PROJECT" ]; then
   [ "$EXTRA_PROJECT" != "$PROJECT_PATH" ] || die "Extra project must differ from the target project."
 
   # Exposed to the config file so it can build paths relative to itself.
+  # shellcheck disable=SC2034
   AIFORGE_EXTRA_ROOT="$EXTRA_PROJECT"
 
   # Load the extra project's config (a shell snippet setting AIFORGE_* vars).
@@ -527,7 +578,8 @@ run_menu() {
 
     IFS= read -rsn1 key || break
     if [ "$key" = $'\033' ]; then
-      read -rsn2 -t 0.001 key2
+      key2=""
+      read -rsn2 -t "$ESC_SEQ_TIMEOUT" key2
       key="${key}${key2}"
     fi
 
@@ -829,7 +881,7 @@ MCP_ROW_NOTE=()     # "" | "fallback"
 MCP_MISSING_COUNT=0
 
 add_mcp_rows() {
-  local label="$1" toks="$2" t server note where
+  local label="$1" toks="$2" t server note
   [ -n "$toks" ] || return 0
   for t in $toks; do
     note=""
@@ -837,7 +889,7 @@ add_mcp_rows() {
     MCP_ROW_ITEM+=("$label")
     MCP_ROW_SERVER+=("$server")
     MCP_ROW_NOTE+=("$note")
-    if where="$(mcp_configured "$server")"; then
+    if mcp_configured "$server" >/dev/null; then
       MCP_ROW_OK+=("1")
     else
       MCP_ROW_OK+=("0")
@@ -1200,7 +1252,7 @@ write_manifest() {
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u)"
 
   # --- sources array (ai-forge + each extra root) ---
-  local sources root name first=1 src_json="["
+  local root name src_json="["
   src_json="${src_json}{\"name\":\"ai-forge\",\"root\":\"$(json_escape "$SCRIPT_DIR")\",\"commit\":$(git_commit_of "$SCRIPT_DIR")}"
   for root in $AIFORGE_EXTRA_ROOTS; do
     name="$(basename "$root")"
