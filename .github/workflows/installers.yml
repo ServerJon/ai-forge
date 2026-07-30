@@ -1,0 +1,170 @@
+name: installers
+
+# Both installers are maintained by hand, so every platform that users can
+# install from is exercised here: bash on Linux/macOS (including the Bash 3.2
+# that ships with macOS), PowerShell 7 everywhere, Windows PowerShell 5.1 on
+# Windows, and a parity job that diffs the results of the two.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  shell-lint:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: bash -n install.sh
+
+      - name: ShellCheck
+        run: shellcheck --severity=warning install.sh tests/parity/compare-installers.sh
+
+  bash-installer:
+    name: install.sh (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dry run
+        run: ./install.sh -p "$RUNNER_TEMP" --list-all --dry-run
+
+      - name: Install everything
+        run: |
+          mkdir -p "$RUNNER_TEMP/target"
+          ./install.sh -p "$RUNNER_TEMP/target" --list-all -y
+
+      - name: Assert the payload landed
+        run: |
+          set -e
+          test -f "$RUNNER_TEMP/target/AGENTS.md"
+          test -f "$RUNNER_TEMP/target/.agents/manifest.json"
+          test -d "$RUNNER_TEMP/target/.agents/skills"
+          test -d "$RUNNER_TEMP/target/.agents/agents"
+
+      # macOS still ships Bash 3.2 as /bin/bash: guard the compatibility
+      # fallbacks (no fractional read timeouts, no mapfile, no associative
+      # arrays) that the interactive menu depends on.
+      - name: Run under Bash 3.2
+        if: runner.os == 'macOS'
+        run: |
+          /bin/bash --version | head -1
+          mkdir -p "$RUNNER_TEMP/bash32"
+          /bin/bash ./install.sh -p "$RUNNER_TEMP/bash32" --list-all --dry-run
+
+      # `sh install.sh` starts bash in POSIX mode, where process substitution
+      # is a syntax error; the script must re-exec itself instead of failing.
+      - name: Run through sh
+        run: |
+          mkdir -p "$RUNNER_TEMP/posix"
+          sh ./install.sh -p "$RUNNER_TEMP/posix" --list-all --dry-run
+
+  powershell-installer:
+    name: install.ps1 (${{ matrix.os }} / ${{ matrix.shell }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            shell: pwsh
+          # Windows PowerShell 5.1: the default on a clean Windows install.
+          - os: windows-latest
+            shell: powershell
+          - os: ubuntu-latest
+            shell: pwsh
+          - os: macos-latest
+            shell: pwsh
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Report host
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          $PSVersionTable | Out-String
+
+      - name: Dry run
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          ./install.ps1 -Path $env:RUNNER_TEMP -ListAll -DryRun -NoColor
+
+      - name: Install everything
+        run: |
+          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
+          $target = Join-Path $env:RUNNER_TEMP 'target'
+          New-Item -ItemType Directory -Path $target -Force | Out-Null
+          ./install.ps1 -Path $target -ListAll -Yes -NoColor
+
+      - name: Assert the payload landed
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP 'target'
+          foreach ($relative in @('AGENTS.md', '.agents/manifest.json', '.agents/skills', '.agents/agents')) {
+            $path = Join-Path $target $relative
+            if (-not (Test-Path -LiteralPath $path)) { throw "missing: $path" }
+          }
+          Get-Content -LiteralPath (Join-Path $target '.agents/manifest.json') -Raw | ConvertFrom-Json | Out-Null
+
+  powershell-quality:
+    name: analyzer + pester
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install analysis modules
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -MinimumVersion 1.21.0
+          Install-Module Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.5.0
+
+      - name: PSScriptAnalyzer
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 `
+            -Severity Error, Warning -ExcludeRule PSUseDeclaredVarsMoreThanAssignments
+          if ($results) {
+            $results | Format-Table -AutoSize | Out-String | Write-Host
+          }
+          # Warnings are reported for review; only errors block the build.
+          $errors = @($results | Where-Object { $_.Severity -eq 'Error' })
+          if ($errors.Count -gt 0) {
+            throw "PSScriptAnalyzer reported $($errors.Count) error(s)."
+          }
+
+      - name: Pester
+        run: |
+          Import-Module Pester -MinimumVersion 5.5.0
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests/powershell'
+          $config.Run.Throw = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+
+  parity:
+    name: bash vs powershell parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare both installers
+        run: ./tests/parity/compare-installers.sh
