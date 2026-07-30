@@ -37,7 +37,11 @@ A PR is merged only when **all** of these hold:
 | New skill     | `skills/<group>/<skill-name>/SKILL.md`     |
 | New agent     | `agents/<group>/<agent-name>.md`           |
 | Fix / improve | Existing skill, agent, or installer        |
+| Installer     | `install.sh` **and** `install.ps1`         |
 | Docs          | `README.md`, this file, skill `README.md`s |
+
+Installer changes always touch two files — see
+[Changing the installers](#changing-the-installers).
 
 If unsure whether an idea fits, **open an issue first** to discuss it before
 investing time in a PR.
@@ -126,20 +130,61 @@ docs: document the --extra layering flow
 
 ---
 
+## Changing the installers
+
+There are two installers and they are **independent implementations**, not a
+script and a wrapper:
+
+| File          | Runs on                                | Modules                             |
+| ------------- | -------------------------------------- | ----------------------------------- |
+| `install.sh`  | Linux, macOS, Git Bash                 | single file                         |
+| `install.ps1` | Windows PowerShell 5.1+, PowerShell 7+ | `scripts/powershell/AiForge.*.psm1` |
+
+Any behavioural change — a new helper command, a new dependency mapping, a
+different manifest field — **must be made in both**. The lookup tables most
+likely to drift are `cmd_deps_for` / `mcp_deps_for` in `install.sh` and
+`$script:CommandDependencies` / `$script:McpDependencies` in
+`AiForge.Dependencies.psm1`.
+
+Constraints worth knowing before you edit:
+
+- `install.sh` must keep working on **Bash 3.2** (still `/bin/bash` on macOS):
+  no associative arrays, no `mapfile`, no fractional `read -t` timeouts.
+- `install.ps1` must keep working on **Windows PowerShell 5.1**: no `??`, no
+  ternaries, no `ConvertFrom-Json -AsHashtable`, no `$IsWindows`.
+- Files written by either installer must be UTF-8 **without** a BOM.
+
 ## Testing your changes
 
 Before opening a PR:
 
 ```bash
-# Installer must stay syntactically valid
+# The Bash installer must stay syntactically valid
 bash -n install.sh
+shellcheck --severity=warning install.sh
 
-# Preview installation without writing anything
+# Preview an installation without writing anything
 ./install.sh -p /tmp/aiforge-test --dry-run
+```
+
+If you touched the PowerShell installer (or anything both installers read):
+
+```bash
+# Unit tests for the PowerShell modules
+pwsh -c "Invoke-Pester ./tests/powershell -Output Detailed"
+
+# Static analysis
+pwsh -c "Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning"
+
+# Install with both installers and diff the results
+./tests/parity/compare-installers.sh
 ```
 
 - New/edited skills and agents should appear correctly in the installer menu.
 - Verify Markdown renders and frontmatter is valid YAML.
+
+The `installers` GitHub Actions workflow runs all of the above across Linux,
+macOS and Windows on every pull request.
 
 ---
 
@@ -157,6 +202,8 @@ bash -n install.sh
 - [ ] Commits follow Conventional Commits.
 - [ ] New skills/agents follow the folder layout and frontmatter convention.
 - [ ] `bash -n install.sh` passes and `--dry-run` lists the change correctly.
+- [ ] Installer changes were made in **both** `install.sh` and `install.ps1`,
+      and `./tests/parity/compare-installers.sh` still passes.
 - [ ] README / docs updated if behaviour or catalog changed.
 - [ ] PR description explains the motivation and what you tested.
 
