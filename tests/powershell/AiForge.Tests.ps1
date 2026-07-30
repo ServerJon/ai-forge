@@ -170,12 +170,12 @@ Describe 'AiForge.Menu' {
 
     It 'aggregates the parent checkbox from its children' {
         Set-AiForgeSubtreeChecked -Items $script:MenuItems -Index $script:SkillsCategory -Value $true -Confirm:$false
-        Update-AiForgeParentChecks -Items $script:MenuItems
+        Update-AiForgeParentCheck -Items $script:MenuItems
         $script:MenuItems[$script:SkillsCategory].Checked | Should -BeTrue
     }
 
     It 'never selects disabled helper commands with -ListAll' {
-        Select-AiForgeAllItems -Items $script:MenuItems | Out-Null
+        Select-AiForgeAllItem -Items $script:MenuItems | Out-Null
         $selection = Get-AiForgeSelection -Items $script:MenuItems
         $selection.Commands.Count | Should -Be 0
     }

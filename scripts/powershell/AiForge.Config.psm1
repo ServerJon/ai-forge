@@ -71,8 +71,10 @@ function ConvertTo-AiForgeNativePath {
     }
 
     # Only rewrite POSIX-looking drive paths when we are actually on Windows.
-    $isWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
-    if ($isWindows) {
+    # Deliberately not named $isWindows: that is a read-only automatic variable
+    # on PowerShell 6+, and variable names are case-insensitive.
+    $onWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT
+    if ($onWindows) {
         if ($result -match '^/mnt/([a-zA-Z])/(.*)$') {
             $result = '{0}:\{1}' -f $Matches[1].ToUpperInvariant(), $Matches[2]
         } elseif ($result -match '^/([a-zA-Z])/(.*)$') {

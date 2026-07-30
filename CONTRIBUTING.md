@@ -173,8 +173,8 @@ If you touched the PowerShell installer (or anything both installers read):
 # Unit tests for the PowerShell modules
 pwsh -c "Invoke-Pester ./tests/powershell -Output Detailed"
 
-# Static analysis
-pwsh -c "Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning"
+# Static analysis -- must report nothing; CI fails on warnings too
+pwsh -c "Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -Settings ./PSScriptAnalyzerSettings.psd1"
 
 # Install with both installers and diff the results
 ./tests/parity/compare-installers.sh

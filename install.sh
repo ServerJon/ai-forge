@@ -19,18 +19,40 @@
 # -----------------------------------------------------------------------------
 
 # The installer relies on bash features (arrays, `read -rsn`, process
-# substitution). Fail early and clearly when invoked through sh/dash/zsh, which
-# would otherwise break further down with confusing syntax errors.
+# substitution), so hand over to bash whenever another shell started us:
+#   * `sh install.sh` on Linux runs dash, which lacks those features entirely.
+#   * `sh install.sh` on macOS runs bash in POSIX mode, where the process
+#     substitutions further down are a syntax error.
+#   * `zsh install.sh` behaves like the first case.
+# AIFORGE_REEXEC breaks the loop if the handover lands in a POSIX shell again.
+aiforge_needs_bash=""
 if [ -z "${BASH_VERSION:-}" ]; then
+  aiforge_needs_bash="yes"
+else
+  case ":${SHELLOPTS:-}:" in
+    *:posix:*) aiforge_needs_bash="yes" ;;
+  esac
+fi
+
+if [ -n "$aiforge_needs_bash" ]; then
+  # "$0" is only a path we can re-run when the script came from a file: piping
+  # it into a shell leaves "$0" pointing at the shell binary itself.
+  case "${0:-}" in
+    *.sh) aiforge_self="$0" ;;
+    *) aiforge_self="" ;;
+  esac
+
+  if [ -z "${AIFORGE_REEXEC:-}" ] && [ -n "$aiforge_self" ] && [ -r "$aiforge_self" ] &&
+    command -v bash >/dev/null 2>&1; then
+    AIFORGE_REEXEC=1
+    export AIFORGE_REEXEC
+    exec bash "$aiforge_self" "$@"
+  fi
   printf 'This installer requires bash. Run it as: bash install.sh -p <project-path>\n' >&2
   exit 1
 fi
 
-# `sh install.sh` starts bash in POSIX mode (this is what /bin/sh is on macOS),
-# where process substitution is a syntax error. Re-exec through a real bash.
-case ":${SHELLOPTS:-}:" in
-  *:posix:*) exec bash "$0" "$@" ;;
-esac
+unset aiforge_needs_bash AIFORGE_REEXEC
 
 set -uo pipefail
 

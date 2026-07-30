@@ -68,7 +68,7 @@ function Set-AiForgeSubtreeChecked {
     }
 }
 
-function Update-AiForgeParentChecks {
+function Update-AiForgeParentCheck {
     <#
     .SYNOPSIS
         Recomputes category/subfolder checkmarks from their children.
@@ -113,7 +113,8 @@ function Get-AiForgeConsoleSize {
         if ([Console]::WindowHeight -gt 0) { $rows = [Console]::WindowHeight }
         if ([Console]::WindowWidth -gt 0) { $cols = [Console]::WindowWidth }
     } catch {
-        # Keep the defaults.
+        # No console attached (redirected output, CI): keep the 24x80 defaults.
+        Write-Debug "Console size unavailable: $($_.Exception.Message)"
     }
     [pscustomobject]@{ Rows = $rows; Cols = $cols }
 }
@@ -244,7 +245,7 @@ function Show-AiForgeMenu {
     $cursor = 0
 
     while ($true) {
-        Update-AiForgeParentChecks -Items $Items
+        Update-AiForgeParentCheck -Items $Items
         Show-AiForgeMenuFrame -Items $Items -Cursor $cursor -ProjectPath $ProjectPath
 
         $key = [Console]::ReadKey($true)
@@ -286,7 +287,7 @@ function Show-AiForgeMenu {
     }
 }
 
-function Select-AiForgeAllItems {
+function Select-AiForgeAllItem {
     <#
     .SYNOPSIS
         Non-interactive selection: checks every installable skill/agent leaf.
@@ -317,8 +318,8 @@ function Select-AiForgeAllItems {
 Export-ModuleMember -Function @(
     'Test-AiForgeDescendant'
     'Set-AiForgeSubtreeChecked'
-    'Update-AiForgeParentChecks'
+    'Update-AiForgeParentCheck'
     'Get-AiForgeConsoleSize'
     'Show-AiForgeMenu'
-    'Select-AiForgeAllItems'
+    'Select-AiForgeAllItem'
 )

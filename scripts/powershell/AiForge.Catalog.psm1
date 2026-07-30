@@ -93,10 +93,14 @@ function Test-AiForgeAgentInstalled {
     Test-Path -LiteralPath $marker -PathType Leaf
 }
 
-function Sort-AiForgeOrdinal {
+function Get-AiForgeOrdinalSort {
     <#
     .SYNOPSIS
         Ordinal (byte-order) sort, matching `sort` under the C locale.
+
+    .NOTES
+        Named Get-* because "Sort" is not an approved PowerShell verb --
+        Sort-Object predates the verb list and is grandfathered in.
 
     .DESCRIPTION
         PowerShell's Sort-Object is culture-aware and would order items
@@ -132,7 +136,7 @@ function Get-AiForgeChildDirectory {
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return @() }
     $dirs = @(Get-ChildItem -LiteralPath $Path -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { $_.FullName })
-    Sort-AiForgeOrdinal -InputObject $dirs
+    Get-AiForgeOrdinalSort -InputObject $dirs
 }
 
 function Test-AiForgeHidden {
@@ -179,7 +183,7 @@ function Add-AiForgeAgentRow {
 
         $files = @(Get-ChildItem -LiteralPath $subdir -File -Filter '*.md' -ErrorAction SilentlyContinue |
             ForEach-Object { $_.FullName })
-        $files = Sort-AiForgeOrdinal -InputObject $files
+        $files = Get-AiForgeOrdinalSort -InputObject $files
 
         $visible = @($files | Where-Object {
             -not (Test-AiForgeHidden -Name ([System.IO.Path]::GetFileNameWithoutExtension($_)) -IsSelf $IsSelf -HiddenNames $HiddenAgents)
@@ -224,7 +228,7 @@ function Add-AiForgeSkillRow {
 
         $skillDirs = @(Get-ChildItem -LiteralPath $subdir -File -Filter 'SKILL.md' -Recurse -ErrorAction SilentlyContinue |
             ForEach-Object { $_.DirectoryName } | Select-Object -Unique)
-        $skillDirs = Sort-AiForgeOrdinal -InputObject $skillDirs
+        $skillDirs = Get-AiForgeOrdinalSort -InputObject $skillDirs
 
         if ($skillDirs.Count -gt 0) {
             $Items.Add((New-AiForgeItem -Label "$sub$LabelSuffix" -Type 'sub' -Sub $sub -Source $subdir -Parent $CategoryIndex -Depth 1))
@@ -337,7 +341,7 @@ Export-ModuleMember -Function @(
     'Get-AiForgeAgentsDestination'
     'Test-AiForgeSkillInstalled'
     'Test-AiForgeAgentInstalled'
-    'Sort-AiForgeOrdinal'
+    'Get-AiForgeOrdinalSort'
     'Get-AiForgeChildDirectory'
     'Test-AiForgeHidden'
     'Add-AiForgeAgentRow'

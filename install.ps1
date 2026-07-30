@@ -106,9 +106,25 @@ function Invoke-AiForgeInstaller {
     <#
     .SYNOPSIS
         Orchestrates the install, mirroring the section order of install.sh.
+
+    .DESCRIPTION
+        The script parameters are passed in rather than read from the script
+        scope, so the flow can be exercised without re-running the whole file.
     #>
     [CmdletBinding()]
-    param()
+    param(
+        [AllowEmptyString()]
+        [string] $Path,
+
+        [AllowEmptyString()]
+        [string] $Extra,
+
+        [switch] $ListAll,
+
+        [switch] $Yes,
+
+        [switch] $DryRun
+    )
 
     # --- 1. Resolve and validate the project path ---------------------------
     $targetPath = $Path
@@ -155,7 +171,7 @@ function Invoke-AiForgeInstaller {
 
     # --- 3. Selection (menu or -ListAll) ------------------------------------
     if ($ListAll) {
-        $count = Select-AiForgeAllItems -Items $items
+        $count = Select-AiForgeAllItem -Items $items
         Write-AiForgeInfo "-ListAll: selected $count skill/agent item(s) (helper commands not auto-run)."
         if ($count -eq 0) {
             throw 'Nothing to install -- every available skill/agent is already present in the target.'
@@ -203,7 +219,9 @@ function Invoke-AiForgeInstaller {
 Initialize-AiForgeConsole -NoColor:$NoColor
 
 try {
-    Invoke-AiForgeInstaller
+    # Cast so omitted parameters arrive as '' instead of $null under strict mode.
+    Invoke-AiForgeInstaller -Path ([string]$Path) -Extra ([string]$Extra) `
+        -ListAll:$ListAll -Yes:$Yes -DryRun:$DryRun
     exit 0
 } catch {
     Write-AiForgeError $_.Exception.Message

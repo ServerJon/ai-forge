@@ -21,5 +21,9 @@
         # snippet in README.md; it has to be executed verbatim, exactly as
         # install.sh does with `eval`.
         'PSAvoidUsingInvokeExpression'
+
+        # Pester fixtures are assigned in BeforeAll and consumed inside It
+        # blocks, which the rule cannot follow across scriptblock boundaries.
+        'PSUseDeclaredVarsMoreThanAssignments'
     )
 }

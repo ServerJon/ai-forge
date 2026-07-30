@@ -65,8 +65,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/bash32"
           /bin/bash ./install.sh -p "$RUNNER_TEMP/bash32" --list-all --dry-run
 
-      # `sh install.sh` starts bash in POSIX mode, where process substitution
-      # is a syntax error; the script must re-exec itself instead of failing.
+      # /bin/sh is dash on Ubuntu and bash in POSIX mode on macOS; neither can
+      # run the script, so it must hand over to bash instead of failing.
       - name: Run through sh
         run: |
           mkdir -p "$RUNNER_TEMP/posix"
@@ -92,22 +92,22 @@ jobs:
     defaults:
       run:
         shell: ${{ matrix.shell }}
+    # Process-scope execution policy. Set-ExecutionPolicy is Windows-only and
+    # throws on Linux/macOS, but the environment variable it writes is simply
+    # ignored there, so one job-level setting covers every host.
+    env:
+      PSExecutionPolicyPreference: Bypass
     steps:
       - uses: actions/checkout@v4
 
       - name: Report host
-        run: |
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          $PSVersionTable | Out-String
+        run: $PSVersionTable | Out-String
 
       - name: Dry run
-        run: |
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
-          ./install.ps1 -Path $env:RUNNER_TEMP -ListAll -DryRun -NoColor
+        run: ./install.ps1 -Path $env:RUNNER_TEMP -ListAll -DryRun -NoColor
 
       - name: Install everything
         run: |
-          Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
           $target = Join-Path $env:RUNNER_TEMP 'target'
           New-Item -ItemType Directory -Path $target -Force | Out-Null
           ./install.ps1 -Path $target -ListAll -Yes -NoColor
@@ -128,6 +128,8 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      PSExecutionPolicyPreference: Bypass
     steps:
       - uses: actions/checkout@v4
 
@@ -137,17 +139,16 @@ jobs:
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -MinimumVersion 1.21.0
           Install-Module Pester -Force -SkipPublisherCheck -Scope CurrentUser -MinimumVersion 5.5.0
 
+      # The tree is analyzer-clean, so warnings block too: rules that do not
+      # suit an interactive installer are silenced in the settings file rather
+      # than tolerated here.
       - name: PSScriptAnalyzer
         run: |
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 `
-            -Severity Error, Warning -ExcludeRule PSUseDeclaredVarsMoreThanAssignments
-          if ($results) {
+          $results = @(Invoke-ScriptAnalyzer -Path . -Recurse -Settings ./PSScriptAnalyzerSettings.psd1 `
+            -Severity Error, Warning)
+          if ($results.Count -gt 0) {
             $results | Format-Table -AutoSize | Out-String | Write-Host
-          }
-          # Warnings are reported for review; only errors block the build.
-          $errors = @($results | Where-Object { $_.Severity -eq 'Error' })
-          if ($errors.Count -gt 0) {
-            throw "PSScriptAnalyzer reported $($errors.Count) error(s)."
+            throw "PSScriptAnalyzer reported $($results.Count) finding(s)."
           }
 
       - name: Pester
