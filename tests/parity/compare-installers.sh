@@ -10,8 +10,8 @@
 #
 #   ./tests/parity/compare-installers.sh
 #
-# Requirements: bash, pwsh (PowerShell 7+), and network access (one bundled
-# skill installs itself with `npx skills add`).
+# Requirements: bash and pwsh (PowerShell 7+). Remote bundles are intentionally
+# excluded from --list-all, so this check does not execute network commands.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail

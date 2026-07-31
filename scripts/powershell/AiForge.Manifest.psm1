@@ -97,7 +97,7 @@ function New-AiForgeManifest {
         }
     })
 
-    $remote = @(foreach ($item in $selection.Remote) {
+    $remote = @(foreach ($item in $Context.InstalledRemote) {
         [ordered]@{
             name   = $item.Name
             source = Get-AiForgeSourceLabel -SourcePath $item.Source -Config $config
@@ -127,7 +127,7 @@ function Write-AiForgeManifest {
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][pscustomobject] $Context)
 
-    $total = $Context.InstalledSkills.Count + $Context.InstalledAgents.Count + $Context.Selection.Remote.Count
+    $total = $Context.InstalledSkills.Count + $Context.InstalledAgents.Count + $Context.InstalledRemote.Count
     if ($total -le 0) { return }
 
     $manifestDir = Join-Path $Context.ProjectPath '.agents'

@@ -28,7 +28,7 @@ $script:CommandDependencies = @{
     'common/create-mr-pr'                             = 'git gh|glab'
     'python/pytest'                                   = 'python3|python pytest'
     'hexagonal-architecture/create-alembic-migration' = 'python3|python alembic|poetry|uv|pdm'
-    'hexagonal-architecture/testing'                  = 'python3|python pytest|poetry|uv'
+    'hexagonal-architecture/hexagonal-architecture-testing' = 'python3|python pytest|poetry|uv'
     'playwright/playwright-cli'                       = 'playwright-cli|playwright'
     'agent/mr-pr-reviewer'                            = 'git gh|glab'
 }

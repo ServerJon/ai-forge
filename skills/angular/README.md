@@ -14,5 +14,9 @@ Agent Skills are designed to be used with agentic coding tools like [Gemini CLI]
 To use these skills in your own environment you may follow the instructions for your specific tool or use a community tool like [skills.sh](https://skills.sh/).
 
 ```bash
-npx skills add https://github.com/angular/skills
+npx --yes skills@1.5.21 add https://github.com/angular/skills/tree/22.1.0+sha-eb10e93 --yes
 ```
+
+The ai-forge installer reads the equivalent executable and argument list from
+`install.args`, asks for confirmation, and invokes it without shell evaluation.
+Update both the CLI version and Angular skills commit deliberately.

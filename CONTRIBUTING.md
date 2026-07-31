@@ -128,6 +128,18 @@ docs: document the --extra layering flow
 2. Follow the frontmatter convention (`name`, `description`) used by existing agents.
 3. Reference existing skills rather than duplicating their content.
 
+## Adding a remote skill bundle
+
+Remote bundles execute an external installer only after explicit menu selection
+and confirmation. Create `skills/<group>/install.args`, with one executable or
+argument per line. Surrounding whitespace is trimmed; blank lines and lines
+beginning with `#` are ignored.
+
+Do not put shell syntax, quoting, pipes, redirects, or environment assignments
+in this file. Pin package versions and remote source commits, and mirror the
+human-readable command in the group's `README.md`. Remote bundles are
+intentionally excluded from `--list-all`.
+
 ---
 
 ## Changing the installers
