@@ -290,11 +290,11 @@ function Show-AiForgeMenu {
 function Select-AiForgeAllItem {
     <#
     .SYNOPSIS
-        Non-interactive selection: checks every installable skill/agent leaf.
+        Non-interactive selection: checks every local skill/agent leaf.
 
     .DESCRIPTION
-        Helper command rows stay unselected so a bulk install never triggers
-        side-effecting commands without an explicit menu choice.
+        Remote bundles and helper command rows stay unselected so a bulk
+        install never triggers external commands without an explicit choice.
 
     .OUTPUTS
         The number of rows selected.
@@ -307,7 +307,7 @@ function Select-AiForgeAllItem {
 
     $count = 0
     foreach ($item in $Items) {
-        if ($item.Type -notin @('skill', 'agent', 'readme')) { continue }
+        if ($item.Type -notin @('skill', 'agent')) { continue }
         if ($item.Installed) { continue }
         $item.Checked = $true
         $count++

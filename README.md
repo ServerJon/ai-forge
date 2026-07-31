@@ -23,7 +23,7 @@ The skills are AI-runtime agnostic: they follow the `AGENTS.md` / `SKILL.md` con
 | Tool              | Why                                        | Check / install                                                         |
 | ----------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
 | Bash ≥ 3.2        | Runs `install.sh` on Linux/macOS           | preinstalled — on Windows use [`install.ps1`](#windows)                 |
-| Node.js ≥ 22      | Runs `npx`-based tools                     | `node -v` · `nvm install 22`                                            |
+| Node.js ≥ 22.20   | Runs `npx`-based tools                     | `node -v` · `nvm install 22`                                            |
 | `jq` (optional)   | Merges MCP configs when layering `--extra` | `brew install jq` · `apt install jq`                                    |
 | `ctx7` (optional) | Up-to-date library docs inside the agent   | `npx ctx7@latest --version`                                             |
 | `glab` (optional) | GitLab operations skill                    | `brew install glab && glab auth login`                                  |
@@ -145,13 +145,13 @@ works if you would rather run the Bash installer. Mind these four points:
 
 ### Non-interactive install (`--list-all`)
 
-`--list-all` skips the interactive menu and selects **every** available skill and
-agent — handy for scripted setups and CI (no TTY required). Helper commands
-(autoskills, MCP merge, recommendation scans) are **not** auto-run; select those
-from the menu when you want them.
+`--list-all` skips the interactive menu and selects every available **local**
+skill and agent — handy for scripted setups and CI (no TTY required). Remote
+installs and helper commands (autoskills, MCP merge, recommendation scans) are
+not auto-run; select those from the menu when you want them.
 
 ```bash
-# Install everything, unattended
+# Install every local skill and agent, unattended
 ./install.sh -p /path/to/project --list-all -y
 
 # CI smoke test: verify the plan without writing anything
@@ -252,7 +252,12 @@ ai-forge/
     └── sql/                    # SQL code review, query optimisation
 ```
 
-Skills that have special setup instructions include a `README.md` in their folder (e.g. `skills/angular/`, `skills/hexagonal-architecture/`, `skills/playwright/webapp-testing/`).
+Skills that have special setup instructions include a `README.md` in their
+folder (e.g. `skills/angular/`, `skills/hexagonal-architecture/`,
+`skills/playwright/webapp-testing/`). A remote bundle also provides
+`install.args`, with one executable or argument per line. The installer displays
+that command, requires confirmation, and invokes it directly without evaluating
+shell syntax.
 
 ---
 

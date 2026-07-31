@@ -1,5 +1,5 @@
 ---
-name: hexagonal-testing
+name: hexagonal-architecture-testing
 description: >
   Testing conventions, patterns, and test generation for any Python API built with hexagonal
   architecture. Use this skill whenever the user asks to write, generate, review, or audit tests

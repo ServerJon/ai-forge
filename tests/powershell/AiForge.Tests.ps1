@@ -120,6 +120,16 @@ Describe 'AiForge.Catalog' {
         @($script:Items | Where-Object { $_.Type -eq 'agent' }).Count | Should -BeGreaterThan 0
     }
 
+    It 'assigns a unique install name to every skill' {
+        $duplicates = @(
+            $script:Items |
+                Where-Object { $_.Type -eq 'skill' } |
+                Group-Object -Property Name |
+                Where-Object { $_.Count -gt 1 }
+        )
+        $duplicates | Should -BeNullOrEmpty
+    }
+
     It 'marks auto-skills as disabled rather than hiding it' {
         $row = $script:Items | Where-Object { $_.Name -eq 'auto-skills' }
         $row | Should -Not -BeNullOrEmpty
@@ -179,6 +189,12 @@ Describe 'AiForge.Menu' {
         $selection = Get-AiForgeSelection -Items $script:MenuItems
         $selection.Commands.Count | Should -Be 0
     }
+
+    It 'never selects remote installers with -ListAll' {
+        Select-AiForgeAllItem -Items $script:MenuItems | Out-Null
+        $selection = Get-AiForgeSelection -Items $script:MenuItems
+        $selection.Remote.Count | Should -Be 0
+    }
 }
 
 Describe 'AiForge.Dependencies' {
@@ -196,6 +212,8 @@ Describe 'AiForge.Dependencies' {
 
     It 'knows the documented command dependencies' {
         Get-AiForgeCommandDependency -Key 'common/create-mr-pr' | Should -Be @('git', 'gh|glab')
+        Get-AiForgeCommandDependency -Key 'hexagonal-architecture/hexagonal-architecture-testing' |
+            Should -Be @('python3|python', 'pytest', 'poetry|uv')
         Get-AiForgeCommandDependency -Key 'does/not-exist' | Should -BeNullOrEmpty
     }
 
@@ -219,6 +237,32 @@ Describe 'AiForge.Install' {
 
         It 'returns an empty string for a missing file' {
             Get-AiForgeCodeBlock -Path (Join-Path $script:Scratch 'absent.md') -Language 'bash' | Should -Be ''
+        }
+    }
+
+    Context 'Get-AiForgeInstallArgument' {
+        BeforeAll {
+            $script:ArgsFile = Join-Path $script:Scratch 'install.args'
+            @(
+                '# reviewed command'
+                'tool'
+                '  argument with spaces  '
+                '$(must-not-execute)'
+                ''
+            ) | Set-Content -LiteralPath $script:ArgsFile
+            $script:InstallArguments = @(Get-AiForgeInstallArgument -Path $script:ArgsFile)
+        }
+
+        It 'returns one argument per non-comment line' {
+            $script:InstallArguments | Should -Be @('tool', 'argument with spaces', '$(must-not-execute)')
+        }
+
+        It 'treats shell metacharacters as literal argument content' {
+            $script:InstallArguments[2] | Should -Be '$(must-not-execute)'
+        }
+
+        It 'returns no arguments for a missing file' {
+            @(Get-AiForgeInstallArgument -Path (Join-Path $script:Scratch 'absent.args')).Count | Should -Be 0
         }
     }
 
@@ -272,7 +316,7 @@ Describe 'AiForge.Manifest' {
     BeforeAll {
         $script:ManifestTarget = Join-Path $script:Scratch 'manifest-target'
         New-Item -ItemType Directory -Path $script:ManifestTarget -Force | Out-Null
-        $config = New-AiForgeConfig -ScriptRoot $script:RepoRoot
+        $script:ManifestConfig = New-AiForgeConfig -ScriptRoot $script:RepoRoot
         $selection = [pscustomobject]@{
             Skills   = @([pscustomobject]@{ Name = 'demo'; Source = (Join-Path $script:RepoRoot 'skills/common/demo'); Sub = 'common' })
             Agents   = @()
@@ -280,7 +324,8 @@ Describe 'AiForge.Manifest' {
             Commands = @()
             Total    = 1
         }
-        $context = New-AiForgeInstallContext -ProjectPath $script:ManifestTarget -Config $config -Selection $selection -DryRun $true
+        $context = New-AiForgeInstallContext -ProjectPath $script:ManifestTarget -Config $script:ManifestConfig `
+            -Selection $selection -DryRun $true
         $script:Manifest = New-AiForgeManifest -Context $context
     }
 
@@ -294,6 +339,27 @@ Describe 'AiForge.Manifest' {
 
     It 'records the install path of every skill' {
         $script:Manifest['skills'][0]['path'] | Should -Be '.agents/skills/demo'
+    }
+
+    It 'records only remote installs that completed successfully' {
+        $remote = [pscustomobject]@{
+            Name   = 'remote-demo'
+            Source = (Join-Path $script:RepoRoot 'skills/angular')
+            Sub    = 'angular'
+        }
+        $selection = [pscustomobject]@{
+            Skills   = @()
+            Agents   = @()
+            Remote   = @($remote)
+            Commands = @()
+            Total    = 1
+        }
+        $context = New-AiForgeInstallContext -ProjectPath $script:ManifestTarget -Config $script:ManifestConfig `
+            -Selection $selection -DryRun $true
+
+        (New-AiForgeManifest -Context $context)['remoteSkills'].Count | Should -Be 0
+        $context.InstalledRemote.Add($remote)
+        (New-AiForgeManifest -Context $context)['remoteSkills'][0]['name'] | Should -Be 'remote-demo'
     }
 
     It 'stamps an ISO-8601 UTC timestamp' {

@@ -173,8 +173,8 @@ Usage: ./install.sh -p <project-path> [-e <extra-project>] [-a] [-y] [--dry-run]
                   listed alongside ai-forge's, its MCP config is merged, and its
                   ${AIFORGE_EXTRA_CONFIG} file (if present) is loaded for settings
                   (labels, superseded skills/agents, ...).
-  -a, --list-all  Non-interactive: select ALL available skills/agents (no TTY/menu
-                  needed). Helper commands (auto-skills, MCP, scans) are NOT auto-run.
+  -a, --list-all  Non-interactive: select ALL local skills/agents (no TTY/menu
+                  needed). Remote installs and helper commands are NOT auto-run.
                   Combine with -y for fully unattended installs and -n for CI checks.
   -y              Assume "yes" for confirmation prompts.
   -n, --dry-run   Preview the actions without writing anything or running commands.
@@ -370,9 +370,9 @@ add_skills_from_root() {
         add_row "$name" "skill" "$sub" "$name" "$sd" "$parent_idx" 2
         if skill_installed "$name"; then INSTALLED[$(( ${#LBL[@]} - 1 ))]=1; fi
       done
-    elif [ -f "${subdir}/README.md" ]; then
-      # "Remote" skill bundle installed via a README command (e.g. angular).
-      add_row "${sub}${suffix} ${C_DIM}(via README command)${C_RESET}" "readme" "$sub" "$sub" "$subdir" "$cat_idx" 1
+    elif [ -f "${subdir}/install.args" ]; then
+      # Remote bundle whose executable and arguments are reviewed separately.
+      add_row "${sub}${suffix} ${C_DIM}(runs an external command)${C_RESET}" "readme" "$sub" "$sub" "$subdir" "$cat_idx" 1
     fi
   done < <(find "${root}/skills" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 }
@@ -614,19 +614,22 @@ run_menu() {
   printf '\033[H\033[J'
 }
 
-# Non-interactive selection: check every installable skill/agent leaf. Helper
-# command rows (auto-skills, scans, MCP) are intentionally left unselected so a
-# bulk install never triggers side-effecting commands without an explicit menu.
+# Non-interactive selection: check every local skill/agent leaf. Remote bundles
+# and helper commands are intentionally left unselected so a bulk install never
+# triggers an external command without an explicit menu choice.
 select_all_items() {
   local i n=0
   for (( i=0; i<${#LBL[@]}; i++ )); do
     case "${TYPE[$i]}" in
-      skill|agent|readme)
+      skill|agent)
         if [ "${INSTALLED[$i]}" = "0" ]; then CHECKED[$i]=1; n=$(( n + 1 )); fi ;;
     esac
   done
-  info "--list-all: selected ${C_BOLD}${n}${C_RESET} skill/agent item(s) (helper commands not auto-run)."
-  [ "$n" -gt 0 ] || die "Nothing to install — every available skill/agent is already present in the target."
+  info "--list-all: selected ${C_BOLD}${n}${C_RESET} skill/agent item(s), local only (remote installs and helper commands not auto-run)."
+  if [ "$n" -eq 0 ]; then
+    ok "Nothing to install — every available skill/agent is already present in the target."
+    exit 0
+  fi
 }
 
 if [ "$LIST_ALL" -eq 1 ]; then
@@ -735,7 +738,7 @@ cmd_deps_for() {
     common/create-mr-pr)                                echo "git gh|glab" ;;
     python/pytest)                                      echo "python3|python pytest" ;;
     hexagonal-architecture/create-alembic-migration)    echo "python3|python alembic|poetry|uv|pdm" ;;
-    hexagonal-architecture/testing)                     echo "python3|python pytest|poetry|uv" ;;
+    hexagonal-architecture/hexagonal-architecture-testing) echo "python3|python pytest poetry|uv" ;;
     playwright/playwright-cli)                           echo "playwright-cli|playwright" ;;
     agent/mr-pr-reviewer)                               echo "git gh|glab" ;;
     *)                                                  echo "" ;;
@@ -953,6 +956,8 @@ build_mcp_table
 # -----------------------------------------------------------------------------
 INSTALLED_SKILLS=()
 INSTALLED_AGENTS=()
+INSTALLED_REMOTE_NAME=()
+INSTALLED_REMOTE_SRC=()
 RAN_COMMANDS=()
 SPECIAL_NOTES=()
 
@@ -982,29 +987,68 @@ install_agent() {
   INSTALLED_AGENTS+=("$name")
 }
 
-install_readme_skill() {
-  # README-driven (remote) skill, e.g. angular -> `npx skills add ...`.
-  local name="$1" src="$2" cmd
-  cmd="$(extract_code_block "${src}/README.md" bash | head -n 1)"
-  if [ -z "$cmd" ]; then
-    warn "No install command found in ${src}/README.md for '${name}'. Skipping."
+install_remote_skill() {
+  # Each non-comment line in install.args is one argv token. This avoids eval
+  # while preserving arguments containing spaces.
+  local name="$1" src="$2"
+  local args_file="${src}/install.args"
+  local line rendered="" quoted answer
+  local command_args=()
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    case "$line" in
+      ""|\#*) continue ;;
+    esac
+    command_args+=("$line")
+  done < "$args_file"
+
+  if [ "${#command_args[@]}" -eq 0 ]; then
+    warn "No executable found in ${args_file} for '${name}'. Skipping."
     return 0
   fi
+
+  for line in "${command_args[@]}"; do
+    printf -v quoted '%q' "$line"
+    rendered="${rendered}${rendered:+ }${quoted}"
+  done
+
   if [ "$DRY_RUN" -eq 1 ]; then
-    dry "Would run README install for '${name}': ${cmd}"
-    # The first token of the command is the binary it depends on.
-    local bin="${cmd%% *}"
-    command -v "$bin" >/dev/null 2>&1 || warn "'${bin}' not found; this step would fail on a real run."
-    RAN_COMMANDS+=("${name}: ${cmd} (skipped: dry-run)")
+    dry "Would run remote install for '${name}': ${rendered}"
+    command -v "${command_args[0]}" >/dev/null 2>&1 ||
+      warn "'${command_args[0]}' not found; this step would fail on a real run."
+    RAN_COMMANDS+=("${name}: ${rendered} (skipped: dry-run)")
     return 0
   fi
-  info "Installing '${name}' via README command: ${C_BOLD}${cmd}${C_RESET}"
-  ( cd "$PROJECT_PATH" && eval "$cmd" )
+
+  info "Remote install command for '${name}': ${C_BOLD}${rendered}${C_RESET}"
+  if [ "$ASSUME_YES" -eq 0 ]; then
+    printf '%s' "${C_YELLOW}Run this external command? [y/N]${C_RESET} "
+    IFS= read -r answer
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *)
+        warn "Skipped remote install for '${name}'."
+        RAN_COMMANDS+=("${name}: ${rendered} (skipped: not confirmed)")
+        return 0 ;;
+    esac
+  fi
+
+  if ! command -v "${command_args[0]}" >/dev/null 2>&1; then
+    warn "'${command_args[0]}' not found; remote install for '${name}' skipped."
+    return 0
+  fi
+
+  ( cd "$PROJECT_PATH" && "${command_args[@]}" )
   if [ $? -eq 0 ]; then
-    ok "Ran README install for: ${name}"
-    RAN_COMMANDS+=("${name}: ${cmd}")
+    ok "Ran remote install for: ${name}"
+    RAN_COMMANDS+=("${name}: ${rendered}")
+    INSTALLED_REMOTE_NAME+=("$name")
+    INSTALLED_REMOTE_SRC+=("$src")
   else
-    warn "README install command failed for '${name}'."
+    warn "Remote install command failed for '${name}'."
   fi
 }
 
@@ -1149,10 +1193,10 @@ for idx in "${!SEL_SKILL_NAME[@]}"; do
   install_skill "${SEL_SKILL_NAME[$idx]}" "${SEL_SKILL_SRC[$idx]}"
 done
 
-# README-driven (remote) skills
+# Explicitly selected remote skill bundles
 for idx in "${!SEL_README_NAME[@]}"; do
   [ -n "${SEL_README_NAME[$idx]:-}" ] || continue
-  install_readme_skill "${SEL_README_NAME[$idx]}" "${SEL_README_SRC[$idx]}"
+  install_remote_skill "${SEL_README_NAME[$idx]}" "${SEL_README_SRC[$idx]}"
 done
 
 # Helper commands (run sequentially; each waits for the previous to finish)
@@ -1245,7 +1289,7 @@ git_commit_of() {
 }
 
 write_manifest() {
-  local total=$(( ${#INSTALLED_SKILLS[@]} + ${#INSTALLED_AGENTS[@]} + ${#SEL_README_NAME[@]} ))
+  local total=$(( ${#INSTALLED_SKILLS[@]} + ${#INSTALLED_AGENTS[@]} + ${#INSTALLED_REMOTE_NAME[@]} ))
   [ "$total" -gt 0 ] || return 0   # nothing meaningful to record
 
   local manifest="${PROJECT_PATH}/.agents/manifest.json"
@@ -1278,12 +1322,12 @@ write_manifest() {
   done
   agents_json="${agents_json}]"
 
-  # --- remote (README-driven) skills: installed via their own command, so no
+  # --- remote skills: installed via their reviewed external command, so no
   #     local path is tracked, only name + source ---
   local remote_json="[" ; sep=""
-  for i in "${!SEL_README_NAME[@]}"; do
-    [ -n "${SEL_README_NAME[$i]:-}" ] || continue
-    remote_json="${remote_json}${sep}{\"name\":\"$(json_escape "${SEL_README_NAME[$i]}")\",\"source\":\"$(json_escape "$(source_label_for "${SEL_README_SRC[$i]}")")\"}"
+  for i in "${!INSTALLED_REMOTE_NAME[@]}"; do
+    [ -n "${INSTALLED_REMOTE_NAME[$i]:-}" ] || continue
+    remote_json="${remote_json}${sep}{\"name\":\"$(json_escape "${INSTALLED_REMOTE_NAME[$i]}")\",\"source\":\"$(json_escape "$(source_label_for "${INSTALLED_REMOTE_SRC[$i]}")")\"}"
     sep=","
   done
   remote_json="${remote_json}]"

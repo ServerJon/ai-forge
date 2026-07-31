@@ -209,7 +209,7 @@ function Add-AiForgeSkillRow {
 
     .DESCRIPTION
         A subfolder either holds one or more SKILL.md bundles (at any depth) or
-        is a "remote" bundle described by a README.md install command.
+        is a remote bundle with a reviewed install.args argument list.
     #>
     [CmdletBinding()]
     param(
@@ -241,8 +241,8 @@ function Add-AiForgeSkillRow {
                 $item.Installed = Test-AiForgeSkillInstalled -ProjectPath $ProjectPath -Name $name
                 $Items.Add($item)
             }
-        } elseif (Test-Path -LiteralPath (Join-Path $subdir 'README.md') -PathType Leaf) {
-            $Items.Add((New-AiForgeItem -Label "$sub$LabelSuffix" -Note '(via README command)' -Type 'readme' `
+        } elseif (Test-Path -LiteralPath (Join-Path $subdir 'install.args') -PathType Leaf) {
+            $Items.Add((New-AiForgeItem -Label "$sub$LabelSuffix" -Note '(runs an external command)' -Type 'readme' `
                         -Sub $sub -Name $sub -Source $subdir -Parent $CategoryIndex -Depth 1))
         }
     }

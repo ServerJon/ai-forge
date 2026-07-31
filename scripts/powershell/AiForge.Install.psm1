@@ -29,7 +29,8 @@ function New-AiForgeInstallContext {
         [Parameter(Mandatory)][string] $ProjectPath,
         [Parameter(Mandatory)][pscustomobject] $Config,
         [Parameter(Mandatory)][pscustomobject] $Selection,
-        [bool] $DryRun = $false
+        [bool] $DryRun = $false,
+        [bool] $AssumeYes = $false
     )
 
     [pscustomobject]@{
@@ -37,8 +38,10 @@ function New-AiForgeInstallContext {
         Config          = $Config
         Selection       = $Selection
         DryRun          = $DryRun
+        AssumeYes       = $AssumeYes
         InstalledSkills = [System.Collections.Generic.List[string]]::new()
         InstalledAgents = [System.Collections.Generic.List[string]]::new()
+        InstalledRemote = [System.Collections.Generic.List[object]]::new()
         RanCommands     = [System.Collections.Generic.List[string]]::new()
         SpecialNotes    = [System.Collections.Generic.List[string]]::new()
         DroppedItems    = [System.Collections.Generic.List[string]]::new()
@@ -158,10 +161,30 @@ function Install-AiForgeAgent {
     $Context.InstalledAgents.Add($Agent.Name)
 }
 
-function Invoke-AiForgeReadmeSkill {
+function Get-AiForgeInstallArgument {
     <#
     .SYNOPSIS
-        Runs the install command published in a remote skill bundle's README.md.
+        Reads a remote bundle's executable and arguments without shell parsing.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)][string] $Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return @() }
+
+    $arguments = @(
+        Get-Content -LiteralPath $Path | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -and -not $line.StartsWith('#')) { $line }
+        }
+    )
+    $arguments
+}
+
+function Invoke-AiForgeRemoteSkill {
+    <#
+    .SYNOPSIS
+        Runs a reviewed remote skill command without Invoke-Expression.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -169,47 +192,64 @@ function Invoke-AiForgeReadmeSkill {
         [Parameter(Mandatory)][pscustomobject] $Skill
     )
 
-    $block = Get-AiForgeCodeBlock -Path (Join-Path $Skill.Source 'README.md') -Language 'bash'
-    $command = ($block -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1)
+    $argsFile = Join-Path $Skill.Source 'install.args'
+    $commandParts = @(Get-AiForgeInstallArgument -Path $argsFile)
 
-    if (-not $command) {
-        Write-AiForgeWarning "No install command found in $($Skill.Source)/README.md for '$($Skill.Name)'. Skipping."
+    if ($commandParts.Count -eq 0) {
+        Write-AiForgeWarning "No executable found in $argsFile for '$($Skill.Name)'. Skipping."
         return
     }
+
+    $executable = $commandParts[0]
+    $arguments = @($commandParts | Select-Object -Skip 1)
+    $displayCommand = ($commandParts | ForEach-Object {
+        if ($_ -match '\s') { '"{0}"' -f ($_.Replace('"', '\"')) } else { $_ }
+    }) -join ' '
 
     if ($Context.DryRun) {
-        Write-AiForgeDry "Would run README install for '$($Skill.Name)': $command"
-        $binary = ($command -split '\s+')[0]
-        if (-not (Get-Command -Name $binary -ErrorAction SilentlyContinue)) {
-            Write-AiForgeWarning "'$binary' not found; this step would fail on a real run."
+        Write-AiForgeDry "Would run remote install for '$($Skill.Name)': $displayCommand"
+        if (-not (Get-Command -Name $executable -ErrorAction SilentlyContinue)) {
+            Write-AiForgeWarning "'$executable' not found; this step would fail on a real run."
         }
-        $Context.RanCommands.Add("$($Skill.Name): $command (skipped: dry-run)")
+        $Context.RanCommands.Add("$($Skill.Name): $displayCommand (skipped: dry-run)")
         return
     }
 
-    if (-not $PSCmdlet.ShouldProcess($Context.ProjectPath, "run: $command")) { return }
+    Write-AiForgeInfo "Remote install command for '$($Skill.Name)': $displayCommand"
+    if (-not $Context.AssumeYes) {
+        $answer = Read-Host 'Run this external command? [y/N]'
+        if ($answer -notin @('y', 'Y', 'yes', 'YES')) {
+            Write-AiForgeWarning "Skipped remote install for '$($Skill.Name)'."
+            $Context.RanCommands.Add("$($Skill.Name): $displayCommand (skipped: not confirmed)")
+            return
+        }
+    }
 
-    Write-AiForgeInfo "Installing '$($Skill.Name)' via README command: $command"
+    if (-not (Get-Command -Name $executable -ErrorAction SilentlyContinue)) {
+        Write-AiForgeWarning "'$executable' not found; remote install for '$($Skill.Name)' skipped."
+        return
+    }
+
+    if (-not $PSCmdlet.ShouldProcess($Context.ProjectPath, "run: $displayCommand")) { return }
+
     Push-Location -LiteralPath $Context.ProjectPath
     try {
-        # The README publishes a shell command to run verbatim, so this has to
-        # go through Invoke-Expression rather than a parsed argument list.
-        Invoke-Expression $command
-        # A pure-PowerShell command leaves $LASTEXITCODE untouched; treat the
-        # absence of an exit code as success.
-        $exitCode = if (Test-Path variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+        $LASTEXITCODE = 0
+        & $executable @arguments
+        $exitCode = $LASTEXITCODE
     } catch {
-        Write-AiForgeWarning "README install command failed for '$($Skill.Name)': $($_.Exception.Message)"
+        Write-AiForgeWarning "Remote install command failed for '$($Skill.Name)': $($_.Exception.Message)"
         return
     } finally {
         Pop-Location
     }
 
     if ($exitCode -eq 0) {
-        Write-AiForgeOk "Ran README install for: $($Skill.Name)"
-        $Context.RanCommands.Add("$($Skill.Name): $command")
+        Write-AiForgeOk "Ran remote install for: $($Skill.Name)"
+        $Context.RanCommands.Add("$($Skill.Name): $displayCommand")
+        $Context.InstalledRemote.Add($Skill)
     } else {
-        Write-AiForgeWarning "README install command failed for '$($Skill.Name)' (exit $exitCode)."
+        Write-AiForgeWarning "Remote install command failed for '$($Skill.Name)' (exit $exitCode)."
     }
 }
 
@@ -595,7 +635,7 @@ function Invoke-AiForgeInstall {
         Install-AiForgeSkill -Context $Context -Skill $skill -Confirm:$false
     }
     foreach ($remote in $Context.Selection.Remote) {
-        Invoke-AiForgeReadmeSkill -Context $Context -Skill $remote -Confirm:$false
+        Invoke-AiForgeRemoteSkill -Context $Context -Skill $remote -Confirm:$false
     }
     foreach ($command in $Context.Selection.Commands) {
         Invoke-AiForgeHelperCommand -Context $Context -CommandId $command -Confirm:$false
@@ -609,9 +649,10 @@ Export-ModuleMember -Function @(
     'New-AiForgeInstallContext'
     'Get-AiForgeSelection'
     'Get-AiForgeCodeBlock'
+    'Get-AiForgeInstallArgument'
     'Install-AiForgeSkill'
     'Install-AiForgeAgent'
-    'Invoke-AiForgeReadmeSkill'
+    'Invoke-AiForgeRemoteSkill'
     'Complete-AiForgeRecommendation'
     'Test-AiForgeJsonObject'
     'Get-AiForgeJsonEntry'

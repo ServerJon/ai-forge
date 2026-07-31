@@ -1,5 +1,5 @@
 ---
-name: testing
+name: astro-testing
 description: Unit tests with Vitest + Astro Container API and end-to-end tests with Playwright for the Wesog landing page
 user-invocable: false
 ---
