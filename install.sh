@@ -738,7 +738,7 @@ cmd_deps_for() {
     common/create-mr-pr)                                echo "git gh|glab" ;;
     python/pytest)                                      echo "python3|python pytest" ;;
     hexagonal-architecture/create-alembic-migration)    echo "python3|python alembic|poetry|uv|pdm" ;;
-    hexagonal-architecture/hexagonal-architecture-testing) echo "python3|python pytest|poetry|uv" ;;
+    hexagonal-architecture/hexagonal-architecture-testing) echo "python3|python pytest poetry|uv" ;;
     playwright/playwright-cli)                           echo "playwright-cli|playwright" ;;
     agent/mr-pr-reviewer)                               echo "git gh|glab" ;;
     *)                                                  echo "" ;;
