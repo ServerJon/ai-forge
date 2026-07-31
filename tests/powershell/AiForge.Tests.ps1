@@ -240,7 +240,7 @@ Describe 'AiForge.Install' {
         }
     }
 
-    Context 'Get-AiForgeInstallArguments' {
+    Context 'Get-AiForgeInstallArgument' {
         BeforeAll {
             $script:ArgsFile = Join-Path $script:Scratch 'install.args'
             @(
@@ -250,7 +250,7 @@ Describe 'AiForge.Install' {
                 '$(must-not-execute)'
                 ''
             ) | Set-Content -LiteralPath $script:ArgsFile
-            $script:InstallArguments = @(Get-AiForgeInstallArguments -Path $script:ArgsFile)
+            $script:InstallArguments = @(Get-AiForgeInstallArgument -Path $script:ArgsFile)
         }
 
         It 'returns one argument per non-comment line' {
@@ -262,7 +262,7 @@ Describe 'AiForge.Install' {
         }
 
         It 'returns no arguments for a missing file' {
-            @(Get-AiForgeInstallArguments -Path (Join-Path $script:Scratch 'absent.args')).Count | Should -Be 0
+            @(Get-AiForgeInstallArgument -Path (Join-Path $script:Scratch 'absent.args')).Count | Should -Be 0
         }
     }
 

@@ -625,8 +625,11 @@ select_all_items() {
         if [ "${INSTALLED[$i]}" = "0" ]; then CHECKED[$i]=1; n=$(( n + 1 )); fi ;;
     esac
   done
-  info "--list-all: selected ${C_BOLD}${n}${C_RESET} local skill/agent item(s) (remote installs and helper commands not auto-run)."
-  [ "$n" -gt 0 ] || die "Nothing to install — every available skill/agent is already present in the target."
+  info "--list-all: selected ${C_BOLD}${n}${C_RESET} skill/agent item(s), local only (remote installs and helper commands not auto-run)."
+  if [ "$n" -eq 0 ]; then
+    ok "Nothing to install — every available skill/agent is already present in the target."
+    exit 0
+  fi
 }
 
 if [ "$LIST_ALL" -eq 1 ]; then
@@ -987,7 +990,8 @@ install_agent() {
 install_remote_skill() {
   # Each non-comment line in install.args is one argv token. This avoids eval
   # while preserving arguments containing spaces.
-  local name="$1" src="$2" args_file="${src}/install.args"
+  local name="$1" src="$2"
+  local args_file="${src}/install.args"
   local line rendered="" quoted answer
   local command_args=()
 

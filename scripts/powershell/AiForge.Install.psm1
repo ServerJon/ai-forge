@@ -161,7 +161,7 @@ function Install-AiForgeAgent {
     $Context.InstalledAgents.Add($Agent.Name)
 }
 
-function Get-AiForgeInstallArguments {
+function Get-AiForgeInstallArgument {
     <#
     .SYNOPSIS
         Reads a remote bundle's executable and arguments without shell parsing.
@@ -193,7 +193,7 @@ function Invoke-AiForgeRemoteSkill {
     )
 
     $argsFile = Join-Path $Skill.Source 'install.args'
-    $commandParts = @(Get-AiForgeInstallArguments -Path $argsFile)
+    $commandParts = @(Get-AiForgeInstallArgument -Path $argsFile)
 
     if ($commandParts.Count -eq 0) {
         Write-AiForgeWarning "No executable found in $argsFile for '$($Skill.Name)'. Skipping."
@@ -649,7 +649,7 @@ Export-ModuleMember -Function @(
     'New-AiForgeInstallContext'
     'Get-AiForgeSelection'
     'Get-AiForgeCodeBlock'
-    'Get-AiForgeInstallArguments'
+    'Get-AiForgeInstallArgument'
     'Install-AiForgeSkill'
     'Install-AiForgeAgent'
     'Invoke-AiForgeRemoteSkill'

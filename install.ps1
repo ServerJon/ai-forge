@@ -172,9 +172,10 @@ function Invoke-AiForgeInstaller {
     # --- 3. Selection (menu or -ListAll) ------------------------------------
     if ($ListAll) {
         $count = Select-AiForgeAllItem -Items $items
-        Write-AiForgeInfo "-ListAll: selected $count local skill/agent item(s) (remote installs and helper commands not auto-run)."
+        Write-AiForgeInfo "-ListAll: selected $count skill/agent item(s), local only (remote installs and helper commands not auto-run)."
         if ($count -eq 0) {
-            throw 'Nothing to install -- every available skill/agent is already present in the target.'
+            Write-AiForgeOk 'Nothing to install -- every available skill/agent is already present in the target.'
+            return
         }
     } else {
         Show-AiForgeMenu -Items $items -ProjectPath $projectPath
