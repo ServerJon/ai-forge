@@ -20,14 +20,14 @@ The skills are AI-runtime agnostic: they follow the `AGENTS.md` / `SKILL.md` con
 
 ### Prerequisites
 
-| Tool              | Why                                        | Check / install                                                         |
-| ----------------- | ------------------------------------------ | ----------------------------------------------------------------------- |
-| Bash ≥ 3.2        | Runs `install.sh` on Linux/macOS           | preinstalled — on Windows use [`install.ps1`](#windows)                 |
-| Node.js ≥ 22.20   | Runs `npx`-based tools                     | `node -v` · `nvm install 22`                                            |
-| `jq` (optional)   | Merges MCP configs when layering `--extra` | `brew install jq` · `apt install jq`                                    |
-| `ctx7` (optional) | Up-to-date library docs inside the agent   | `npx ctx7@latest --version`                                             |
-| `glab` (optional) | GitLab operations skill                    | `brew install glab && glab auth login`                                  |
-| `gh` (optional)   | GitHub operations skill                    | `brew install gh && gh auth login`                                      |
+| Tool              | Why                                        | Check / install                                         |
+| ----------------- | ------------------------------------------ | ------------------------------------------------------- |
+| Bash ≥ 3.2        | Runs `install.sh` on Linux/macOS           | preinstalled — on Windows use [`install.ps1`](#windows) |
+| Node.js ≥ 22.20   | Runs `npx`-based tools                     | `node -v` · `nvm install 22`                            |
+| `jq` (optional)   | Merges MCP configs when layering `--extra` | `brew install jq` · `apt install jq`                    |
+| `ctx7` (optional) | Up-to-date library docs inside the agent   | `npx ctx7@latest --version`                             |
+| `glab` (optional) | GitLab operations skill                    | `brew install glab && glab auth login`                  |
+| `gh` (optional)   | GitHub operations skill                    | `brew install gh && gh auth login`                      |
 
 Linux and macOS run `install.sh`; Windows runs `install.ps1` natively (WSL 2 and
 Git Bash also work — see [Windows](#windows)).
@@ -53,14 +53,14 @@ The installer presents a checkbox menu. Select any combination of skills and age
 
 Useful flags:
 
-| Flag                | Effect                                                                             |
-| ------------------- | ---------------------------------------------------------------------------------- |
-| `-p <path>`         | Target project path (skips the interactive prompt)                                 |
+| Flag                | Effect                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| `-p <path>`         | Target project path (skips the interactive prompt)                                   |
 | `-e`, `--extra <p>` | Layer another project on top (see [below](#layering-another-project-on-top---extra)) |
-| `-a`, `--list-all`  | Non-interactive: select **all** available skills/agents (no TTY/menu needed)       |
-| `-y`, `--yes`       | Assume "yes" for confirmation prompts                                              |
-| `-n`, `--dry-run`   | Preview what would be installed without writing anything                           |
-| `-h`, `--help`      | Show usage                                                                          |
+| `-a`, `--list-all`  | Non-interactive: select **all** available skills/agents (no TTY/menu needed)         |
+| `-y`, `--yes`       | Assume "yes" for confirmation prompts                                                |
+| `-n`, `--dry-run`   | Preview what would be installed without writing anything                             |
+| `-h`, `--help`      | Show usage                                                                           |
 
 > [!TIP]
 > Run `npx autoskills --dry-run` in your project first to cover common framework skills, then use `install.sh` to layer on the ai-forge extras that autoskills doesn't provide.
@@ -82,14 +82,14 @@ merges MCP configs with the built-in JSON parser so **jq is not needed** on
 Windows. A CI job installs with both scripts and diffs the result, so the two
 stay in step — see [Installer parity](#installer-parity).
 
-| Bash flag        | PowerShell parameter |
-| ---------------- | -------------------- |
-| `-p <path>`      | `-Path <path>`       |
-| `-e <path>`      | `-Extra <path>`      |
-| `-a`             | `-ListAll`           |
-| `-y`             | `-Yes`               |
-| `-n`             | `-DryRun`            |
-| (n/a)            | `-NoColor`           |
+| Bash flag   | PowerShell parameter |
+| ----------- | -------------------- |
+| `-p <path>` | `-Path <path>`       |
+| `-e <path>` | `-Extra <path>`      |
+| `-a`        | `-ListAll`           |
+| `-y`        | `-Yes`               |
+| `-n`        | `-DryRun`            |
+| (n/a)       | `-NoColor`           |
 
 The short aliases work too (`.\install.ps1 -p C:\src\app -a -y`), and
 `Get-Help .\install.ps1 -Full` prints the usage.
@@ -198,7 +198,9 @@ deliberate rather than guesswork.
   "sources": [
     { "name": "ai-forge", "root": "…/ai-forge", "commit": "2da81ae…" }
   ],
-  "skills": [ { "name": "gh", "source": "ai-forge", "path": ".agents/skills/gh" } ],
+  "skills": [
+    { "name": "gh", "source": "ai-forge", "path": ".agents/skills/gh" }
+  ],
   "agents": [],
   "remoteSkills": [],
   "commands": []
@@ -248,7 +250,7 @@ ai-forge/
     ├── javascript-typescript/  # Jest, Vitest, advanced TypeScript types
     ├── playwright/             # E2E testing, playwright-cli, web design reviewer, webapp testing
     ├── python/                 # pytest conventions
-    ├── react/                  # React 17 patterns
+    ├── react/                  # React patterns
     └── sql/                    # SQL code review, query optimisation
 ```
 
@@ -279,18 +281,18 @@ shell syntax.
 
 ### Framework / language
 
-| Skill folder             | Skills                                                                            |
-| ------------------------ | --------------------------------------------------------------------------------- |
-| `angular`                | Angular coding conventions                                                        |
-| `astro`                  | Astro core, i18n, new components, pages, testing                                  |
+| Skill folder             | Skills                                                                                                      |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `angular`                | Angular coding conventions                                                                                  |
+| `astro`                  | Astro core, i18n, new components, pages, testing                                                            |
 | `back4app-mcp`           | Back4App (Parse Server) live backend ops — data/schema inspection, Cloud Code & web-hosting deploys via MCP |
-| `chrome`                 | Chrome DevTools debugging with MCP                                                |
-| `hexagonal-architecture` | Alembic migrations, new entities, error codes, endpoint docs, integration testing |
-| `javascript-typescript`  | Jest, Vitest, advanced TypeScript types                                           |
-| `playwright`             | E2E testing, CLI automation, web-design review, webapp testing                    |
-| `python`                 | pytest patterns                                                                   |
-| `react`                  | React 17 patterns                                                                 |
-| `sql`                    | Code review, query optimisation                                                   |
+| `chrome`                 | Chrome DevTools debugging with MCP                                                                          |
+| `hexagonal-architecture` | Alembic migrations, new entities, error codes, endpoint docs, integration testing                           |
+| `javascript-typescript`  | Jest, Vitest, advanced TypeScript types                                                                     |
+| `playwright`             | E2E testing, CLI automation, web-design review, webapp testing                                              |
+| `python`                 | pytest patterns                                                                                             |
+| `react`                  | React patterns                                                                                              |
+| `sql`                    | Code review, query optimisation                                                                             |
 
 ---
 
@@ -321,10 +323,10 @@ After the install is complete, consider extending your setup with these addition
 
 ### Frontend
 
-| Skill idea | What it would cover |
-| --- | --- |
-| Web design system skill | Design tokens, component naming conventions, spacing/typography rules for AI-assisted UI work |
-| Web UI patterns skill | Common layout and interaction patterns (forms, modals, navigation) for consistent component generation |
+| Skill idea              | What it would cover                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------ |
+| Web design system skill | Design tokens, component naming conventions, spacing/typography rules for AI-assisted UI work          |
+| Web UI patterns skill   | Common layout and interaction patterns (forms, modals, navigation) for consistent component generation |
 
 > [!TIP]
 > You can use the `create-skill` Cursor skill to scaffold any of these. Describe the skill's purpose and the agent will generate a ready-to-use `SKILL.md`.
@@ -359,15 +361,15 @@ A plain shell snippet at the layer project's root. All variables are optional; u
 means stock behaviour. `$AIFORGE_EXTRA_ROOT` is set to the layer path before it loads,
 so you can build paths from it.
 
-| Variable                 | Effect                                                                                        |
-| ------------------------ | --------------------------------------------------------------------------------------------- |
-| `AIFORGE_SELF_LABEL`     | Label suffix next to items from ai-forge itself (e.g. `" (shared)"`).                         |
-| `AIFORGE_EXTRA_LABEL`    | Label suffix next to items from the layer project.                                            |
-| `AIFORGE_HIDE_SKILLS`    | Space-separated ai-forge skill names the layer supersedes (hidden from the menu).             |
-| `AIFORGE_HIDE_AGENTS`    | Space-separated ai-forge agent names the layer supersedes.                                     |
-| `AIFORGE_MCP_OVERLAY`    | Extra `mcp.json` file(s) to merge (defaults to `<layer>/assets/MCPs/mcp.json`).               |
-| `AIFORGE_AGENTS_TEMPLATE`| Path to an `AGENTS.md` template overriding the bundled one.                                    |
-| `AIFORGE_EXTRA_ROOTS`    | Extra source roots to scan (advanced; `--extra` adds the layer path automatically).           |
+| Variable                  | Effect                                                                              |
+| ------------------------- | ----------------------------------------------------------------------------------- |
+| `AIFORGE_SELF_LABEL`      | Label suffix next to items from ai-forge itself (e.g. `" (shared)"`).               |
+| `AIFORGE_EXTRA_LABEL`     | Label suffix next to items from the layer project.                                  |
+| `AIFORGE_HIDE_SKILLS`     | Space-separated ai-forge skill names the layer supersedes (hidden from the menu).   |
+| `AIFORGE_HIDE_AGENTS`     | Space-separated ai-forge agent names the layer supersedes.                          |
+| `AIFORGE_MCP_OVERLAY`     | Extra `mcp.json` file(s) to merge (defaults to `<layer>/assets/MCPs/mcp.json`).     |
+| `AIFORGE_AGENTS_TEMPLATE` | Path to an `AGENTS.md` template overriding the bundled one.                         |
+| `AIFORGE_EXTRA_ROOTS`     | Extra source roots to scan (advanced; `--extra` adds the layer path automatically). |
 
 Example `.ai-forge.env`:
 
