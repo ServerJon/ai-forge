@@ -228,7 +228,9 @@ ai-forge/
 ├── install.sh                  # Interactive skill/agent installer (Linux/macOS)
 ├── install.ps1                 # Same installer, native to Windows PowerShell
 │
-├── scripts/powershell/         # Modules backing install.ps1 (console, catalog, menu, ...)
+├── scripts/
+│   ├── get-github-folder.sh    # Download one GitHub folder or file (paste browser URL)
+│   └── powershell/             # Modules backing install.ps1 (console, catalog, menu, ...)
 ├── tests/powershell/           # Pester tests for those modules
 ├── tests/parity/               # Diffs a bash install against a PowerShell install
 │
@@ -260,6 +262,45 @@ folder (e.g. `skills/angular/`, `skills/hexagonal-architecture/`,
 `install.args`, with one executable or argument per line. The installer displays
 that command, requires confirmation, and invokes it directly without evaluating
 shell syntax.
+
+### Download a skill folder (or file) from GitHub
+
+When you want a single skill (including its `references/` files) — or just one
+file — from another repo without cloning everything or copying files one by
+one, use `scripts/get-github-folder.sh`:
+
+```bash
+chmod +x scripts/get-github-folder.sh   # once
+
+# Folder: no 2nd arg → downloads into scripts/ (next to this script)
+./scripts/get-github-folder.sh \
+  https://github.com/OWNER/REPO/tree/BRANCH/path/to/skill
+
+# Folder: 2nd arg → downloads into that directory (must exist, or its parent must)
+./scripts/get-github-folder.sh \
+  https://github.com/OWNER/REPO/tree/main/skills/common/security-review \
+  ./vendor/skills
+
+# File: paste a /blob/ URL (or a raw.githubusercontent.com link)
+./scripts/get-github-folder.sh \
+  https://github.com/OWNER/REPO/blob/main/skills/common/gh/SKILL.md \
+  ./vendor
+```
+
+| URL kind | How it downloads | Needs |
+| -------- | ---------------- | ----- |
+| `/tree/…` folder | sparse git clone (`--filter=blob:none`) | `git` |
+| `/blob/…` or raw file | `curl` from `raw.githubusercontent.com` | `curl` |
+
+Private repos: `gh auth login` (folders) or a GitHub token for `curl` (files).
+
+> [!NOTE]
+> Inspired by the [Data Science Workbook guide](https://datascience.101workbook.org/07-wrangling/01-file-access/03e-download-github-folders-svn/)
+> that used `svn export` after rewriting `/tree/master/` → `/trunk/` (and
+> `/blob/…` → `/trunk/` for files). That no longer works — GitHub
+> [removed Subversion support](https://github.blog/changelog/2024-01-07-subversion-has-been-sunset/)
+> in January 2024. This script keeps the same UX (paste the browser URL) with
+> modern replacements.
 
 ---
 
@@ -388,5 +429,6 @@ AIFORGE_HIDE_SKILLS="git-workflow"  # this layer's gitlab-workflow supersedes it
 
 - [autoskills](https://github.com/midudev/autoskills) — auto-install community skills from a curated registry
 - [awesome-copilot](https://github.com/github/awesome-copilot) — GitHub's curated collection of Copilot instructions, prompts, and chat modes
+- [Downloading a single folder or file from GitHub](https://datascience.101workbook.org/07-wrangling/01-file-access/03e-download-github-folders-svn/) — original SVN-based tutorial that inspired `scripts/get-github-folder.sh`
 - [AUTO-SKILLS.md](./AUTO-SKILLS.md) — how ai-forge and autoskills relate, gap analysis
 - [AGENTS.template.md](./AGENTS.template.md) — full project AGENTS.md template with all sections
