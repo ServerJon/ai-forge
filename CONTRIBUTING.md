@@ -154,9 +154,16 @@ script and a wrapper:
 
 Any behavioural change — a new helper command, a new dependency mapping, a
 different manifest field — **must be made in both**. The lookup tables most
-likely to drift are `cmd_deps_for` / `mcp_deps_for` in `install.sh` and
-`$script:CommandDependencies` / `$script:McpDependencies` in
-`AiForge.Dependencies.psm1`.
+likely to drift are `cmd_deps_for` / `mcp_deps_for` / `cmd_install_recipe` in
+`install.sh` and `$script:CommandDependencies` / `$script:McpDependencies` /
+`$script:CommandInstallRecipes` in `AiForge.Dependencies.psm1`.
+
+External CLI installs are opt-in (`--install-deps` / `-InstallDeps`, or an
+interactive end-of-run prompt). Checks and Node installs prefer the target
+project's pinned toolchain (`.nvmrc` / `.node-version`, `.python-version` /
+`.pyenv`) and package manager (`pnpm` / `yarn` / `bun` / `npm` from lockfiles
+or `packageManager`). Do not auto-install OS packages with sudo; curated
+recipes only. `-y` / `-Yes` alone must not imply dependency installs.
 
 Constraints worth knowing before you edit:
 
@@ -177,6 +184,9 @@ shellcheck --severity=warning install.sh
 
 # Preview an installation without writing anything
 ./install.sh -p /tmp/aiforge-test --dry-run
+
+# Preview curated dependency installs as well
+./install.sh -p /tmp/aiforge-test --list-all --install-deps --dry-run
 ```
 
 If you touched the PowerShell installer (or anything both installers read):
@@ -191,6 +201,11 @@ pwsh -c "Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -Setting
 # Install with both installers and diff the results
 ./tests/parity/compare-installers.sh
 ```
+
+When changing dependency maps or install recipes, keep
+`cmd_deps_for` / `mcp_deps_for` / `cmd_install_recipe` in `install.sh` in sync
+with `$script:CommandDependencies` / `$script:McpDependencies` /
+`$script:CommandInstallRecipes` in `AiForge.Dependencies.psm1`.
 
 - New/edited skills and agents should appear correctly in the installer menu.
 - Verify Markdown renders and frontmatter is valid YAML.
@@ -216,6 +231,8 @@ macOS and Windows on every pull request.
 - [ ] `bash -n install.sh` passes and `--dry-run` lists the change correctly.
 - [ ] Installer changes were made in **both** `install.sh` and `install.ps1`,
       and `./tests/parity/compare-installers.sh` still passes.
+- [ ] New flags / dependency recipes are documented in `README.md` (and
+      `Get-Help` comment-based help on `install.ps1` when applicable).
 - [ ] README / docs updated if behaviour or catalog changed.
 - [ ] PR description explains the motivation and what you tested.
 

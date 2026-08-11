@@ -1,5 +1,5 @@
 ---
-name: new-component
+name: react-new-component
 description: >
   Scaffold all artifacts for a new React component in the trunk module:
   component file, test file, index.js barrel, and optional styled.js.
@@ -9,7 +9,7 @@ allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 user-invocable: true
 ---
 
-# new-component
+# react-new-component
 
 Scaffold all required files for a new React component in the **trunk** module, following
 project conventions. This skill is action-oriented — it creates files.

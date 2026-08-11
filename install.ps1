@@ -9,7 +9,9 @@
     It presents the same checkbox tree of agents, skills and helper commands,
     resolves dependencies, skips already-installed items, copies the selected
     SKILL.md / agent files into the project's .agents/ folder, drops a
-    pre-filled AGENTS.md and prints a summary with next steps.
+    pre-filled AGENTS.md, optionally installs curated missing CLIs
+    (-InstallDeps or an end-of-run prompt; nvm/pyenv + project PM aware), and
+    prints a summary with next steps.
 
     Behaviour is kept in lockstep with install.sh; a CI parity job installs
     with both and diffs the result. When you change one, change the other.
@@ -34,6 +36,12 @@
 .PARAMETER DryRun
     Preview the actions without writing anything or running commands.
 
+.PARAMETER InstallDeps
+    After installing skills/agents, try to install missing external CLI
+    dependencies (curated recipes only). Without this switch an interactive
+    run still asks once at the end when something is missing. -Yes alone
+    does NOT imply -InstallDeps.
+
 .PARAMETER NoColor
     Disable coloured output.
 
@@ -45,6 +53,9 @@
 
 .EXAMPLE
     .\install.ps1 -Path C:\src\my-project -ListAll -DryRun
+
+.EXAMPLE
+    .\install.ps1 -Path C:\src\my-project -InstallDeps -Yes
 #>
 
 [CmdletBinding()]
@@ -63,6 +74,9 @@ param(
 
     [Alias('n')]
     [switch] $DryRun,
+
+    [Alias('d')]
+    [switch] $InstallDeps,
 
     [switch] $NoColor
 )
@@ -123,7 +137,9 @@ function Invoke-AiForgeInstaller {
 
         [switch] $Yes,
 
-        [switch] $DryRun
+        [switch] $DryRun,
+
+        [switch] $InstallDeps
     )
 
     # --- 1. Resolve and validate the project path ---------------------------
@@ -162,6 +178,9 @@ function Invoke-AiForgeInstaller {
         }
         Write-AiForgeInfo "Layering extra project: $extraProject"
     }
+
+    # --- 1c. Project runtime (nvm / pyenv) + Node package manager ------------
+    $runtime = New-AiForgeProjectRuntime -ProjectPath $projectPath
 
     # --- 2. Build the installable item tree ---------------------------------
     $items = New-AiForgeCatalog -Config $config -ProjectPath $projectPath
@@ -203,19 +222,19 @@ function Invoke-AiForgeInstaller {
     }
 
     # --- 5b/5c. Dependency reporting ----------------------------------------
-    $dependencyRows = New-AiForgeDependencyTable -Selection $selection
+    $dependencyRows = New-AiForgeDependencyTable -Selection $selection -Runtime $runtime
     $mcpRows = New-AiForgeMcpTable -Selection $selection -ProjectPath $projectPath
 
     # --- 6-8. Install --------------------------------------------------------
     $context = New-AiForgeInstallContext -ProjectPath $projectPath -Config $config -Selection $selection `
-        -DryRun $DryRun.IsPresent -AssumeYes $Yes.IsPresent
+        -DryRun $DryRun.IsPresent -AssumeYes $Yes.IsPresent -InstallDeps $InstallDeps.IsPresent
     foreach ($name in $dropped) { $context.DroppedItems.Add($name) }
 
     Invoke-AiForgeInstall -Context $context -Confirm:$false
     Write-AiForgeManifest -Context $context -Confirm:$false
 
     # --- 9. Summary ----------------------------------------------------------
-    Write-AiForgeSummary -Context $context -DependencyRows $dependencyRows -McpRows $mcpRows
+    Write-AiForgeSummary -Context $context -DependencyRows $dependencyRows -McpRows $mcpRows -Runtime $runtime
 }
 
 Initialize-AiForgeConsole -NoColor:$NoColor
@@ -223,7 +242,7 @@ Initialize-AiForgeConsole -NoColor:$NoColor
 try {
     # Cast so omitted parameters arrive as '' instead of $null under strict mode.
     Invoke-AiForgeInstaller -Path ([string]$Path) -Extra ([string]$Extra) `
-        -ListAll:$ListAll -Yes:$Yes -DryRun:$DryRun
+        -ListAll:$ListAll -Yes:$Yes -DryRun:$DryRun -InstallDeps:$InstallDeps
     exit 0
 } catch {
     Write-AiForgeError $_.Exception.Message

@@ -49,7 +49,7 @@ chmod +x install.sh
 > [!IMPORTANT]
 > `install.sh` must have execute permission. If you see `permission denied`, run `chmod +x install.sh` (or invoke it with `bash install.sh -p /path/to/your-project`).
 
-The installer presents a checkbox menu. Select any combination of skills and agents, checks dependencies, then copies the selected `SKILL.md` files into your project's `.agents/` folder and drops a pre-filled `AGENTS.md` at the project root.
+The installer presents a checkbox menu. Select any combination of skills and agents, checks dependencies, then copies the selected `SKILL.md` files into your project's `.agents/` folder and drops a pre-filled `AGENTS.md` at the project root. Pass `-d` / `--install-deps` if you also want curated missing CLIs installed (or answer the end-of-run prompt).
 
 Useful flags:
 
@@ -59,6 +59,7 @@ Useful flags:
 | `-e`, `--extra <p>` | Layer another project on top (see [below](#layering-another-project-on-top---extra)) |
 | `-a`, `--list-all`  | Non-interactive: select **all** available skills/agents (no TTY/menu needed)         |
 | `-y`, `--yes`       | Assume "yes" for confirmation prompts                                                |
+| `-d`, `--install-deps` | Install missing curated CLI deps after copy (see [Installing missing CLI dependencies](#installing-missing-cli-dependencies)) |
 | `-n`, `--dry-run`   | Preview what would be installed without writing anything                             |
 | `-h`, `--help`      | Show usage                                                                           |
 
@@ -88,10 +89,11 @@ stay in step — see [Installer parity](#installer-parity).
 | `-e <path>` | `-Extra <path>`      |
 | `-a`        | `-ListAll`           |
 | `-y`        | `-Yes`               |
+| `-d`        | `-InstallDeps`       |
 | `-n`        | `-DryRun`            |
 | (n/a)       | `-NoColor`           |
 
-The short aliases work too (`.\install.ps1 -p C:\src\app -a -y`), and
+The short aliases work too (`.\install.ps1 -p C:\src\app -a -y -d`), and
 `Get-Help .\install.ps1 -Full` prints the usage.
 
 > [!NOTE]
@@ -154,15 +156,59 @@ not auto-run; select those from the menu when you want them.
 # Install every local skill and agent, unattended
 ./install.sh -p /path/to/project --list-all -y
 
+# Same, and also install curated missing CLIs (ctx7, gh, …)
+./install.sh -p /path/to/project --list-all --install-deps -y
+
 # CI smoke test: verify the plan without writing anything
 ./install.sh -p /tmp/aiforge-ci --list-all --dry-run
 ```
 
 ```powershell
-# The same two runs on Windows
+# The same runs on Windows
 .\install.ps1 -Path C:\src\my-project -ListAll -Yes
+.\install.ps1 -Path C:\src\my-project -ListAll -InstallDeps -Yes
 .\install.ps1 -Path $env:TEMP\aiforge-ci -ListAll -DryRun
 ```
+
+### Installing missing CLI dependencies
+
+After skills/agents are copied, the installer reports which external CLIs those
+items expect (`ctx7`, `gh`, `pytest`, `playwright-cli`, …). Checks prefer the
+target project's pinned toolchain when present:
+
+- Node: `.nvmrc` or `.node-version` via `nvm` (or nvm-windows)
+- Python: `.python-version` or `.pyenv` via `pyenv`
+- Node package manager: lockfiles / `packageManager` → `pnpm`, `yarn`, `bun`, or `npm`
+
+If a pin or version manager is missing, it falls back to the ambient PATH.
+
+| Mode | Behaviour |
+| ---- | --------- |
+| `-d` / `--install-deps` / `-InstallDeps` | After the dependency tables, run curated install recipes for missing CLIs |
+| No `-d`, interactive (no `-y`) | Ask once at the end: *Install missing dependencies now?* |
+| `-y` / `-Yes` alone | Never auto-install deps (CI-safe; does **not** imply `-d`) |
+| `-d` + `-y` | Install without per-command confirmation prompts |
+
+```bash
+# Opt in up front (still confirms each recipe unless -y)
+./install.sh -p /path/to/project --list-all --install-deps -y
+
+# Preview the install recipes without running them
+./install.sh -p /path/to/project --list-all --install-deps --dry-run
+
+# Or omit -d: an interactive run asks once at the end when something is missing
+./install.sh -p /path/to/project
+```
+
+```powershell
+.\install.ps1 -Path C:\src\my-project -ListAll -InstallDeps -Yes
+.\install.ps1 -Path C:\src\my-project -ListAll -InstallDeps -DryRun
+.\install.ps1 -Path C:\src\my-project
+```
+
+Only curated recipes run (`pnpm add -g ctx7`, `brew install gh`,
+`python -m pip install --user pytest`, …). Hints are printed for tools the
+installer will not auto-install (for example `git`, `poetry`, `uv`).
 
 ### Installer parity
 
@@ -332,7 +378,7 @@ Private repos: `gh auth login` (folders) or a GitHub token for `curl` (files).
 | `javascript-typescript`  | Jest, Vitest, advanced TypeScript types                                                                     |
 | `playwright`             | E2E testing, CLI automation, web-design review, webapp testing                                              |
 | `python`                 | pytest patterns                                                                                             |
-| `react`                  | React patterns                                                                                              |
+| `react`                  | React component scaffolding (`react-new-component`)                                                         |
 | `sql`                    | Code review, query optimisation                                                                             |
 
 ---

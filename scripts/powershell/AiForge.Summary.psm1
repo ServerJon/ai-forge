@@ -6,7 +6,8 @@
 
 .DESCRIPTION
     Ports section 9 of install.sh: what was installed, which commands ran,
-    the dependency tables, README post-install prompts and the next steps.
+    the dependency tables, optional curated dependency installs, README
+    post-install prompts and the next steps.
 #>
 
 Set-StrictMode -Version Latest
@@ -45,7 +46,8 @@ function Write-AiForgeSummary {
     param(
         [Parameter(Mandatory)][pscustomobject] $Context,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]] $DependencyRows,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]] $McpRows
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]] $McpRows,
+        [pscustomobject] $Runtime
     )
 
     $rule = (Get-AiForgeGlyph Rule).ToString()
@@ -59,11 +61,16 @@ function Write-AiForgeSummary {
 
     Write-AiForgeItemList -Heading "Agents $verb (-> .agents/agents/):" -Items @($Context.InstalledAgents)
     Write-AiForgeItemList -Heading "Skills $verb (-> .agents/skills/):" -Items @($Context.InstalledSkills)
-    Write-AiForgeItemList -Heading 'Commands run:' -Items @($Context.RanCommands)
     Write-AiForgeItemList -Heading 'Skipped (unmet dependencies):' -Items @($Context.DroppedItems) -HeadingColor Yellow
 
-    Write-AiForgeDependencyTable -Rows $DependencyRows
+    Write-AiForgeDependencyTable -Rows $DependencyRows -Runtime $Runtime
     Write-AiForgeMcpTable -Rows $McpRows
+
+    # Optionally install curated missing CLIs before listing Commands run.
+    $DependencyRows = @(Install-AiForgeMissingDependency -Context $Context -Rows $DependencyRows `
+            -Runtime $Runtime -Selection $Context.Selection)
+
+    Write-AiForgeItemList -Heading 'Commands run:' -Items @($Context.RanCommands)
 
     if ($Context.Selection.Skills | Where-Object { $_.Name -eq 'sync-ai' }) {
         Write-AiForgeText ''
