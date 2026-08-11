@@ -220,6 +220,27 @@ Describe 'AiForge.Dependencies' {
     It 'parses the (fallback) marker on MCP tokens' {
         Get-AiForgeMcpDependency -Key 'common/context7-cli' | Should -Be @('context7(fallback)')
     }
+
+    It 'exposes curated install recipes for known CLIs' {
+        Get-AiForgeCommandInstallRecipe -Command 'ctx7' | Should -Be 'node-global|ctx7'
+        Get-AiForgeCommandInstallRecipe -Command 'playwright-cli' | Should -Be 'node-global|@playwright/cli'
+        Get-AiForgeCommandInstallRecipe -Command 'pytest' | Should -Be 'python-pip|pytest'
+        Get-AiForgeCommandInstallRecipe -Command 'unknown-tool' | Should -Be ''
+    }
+
+    It 'detects the Node package manager from lockfiles' {
+        $dir = Join-Path $script:Scratch 'pm-pnpm'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'pnpm-lock.yaml') -Value 'lockfileVersion: 9'
+        Get-AiForgeNodePackageManager -ProjectPath $dir | Should -Be 'pnpm'
+    }
+
+    It 'builds global install argv for pnpm and npm' {
+        Get-AiForgeNodeGlobalInstallArgument -Package 'ctx7' -PackageManager 'pnpm' |
+            Should -Be @('pnpm', 'add', '-g', 'ctx7')
+        Get-AiForgeNodeGlobalInstallArgument -Package 'ctx7' -PackageManager 'npm' |
+            Should -Be @('npm', 'install', '-g', 'ctx7')
+    }
 }
 
 Describe 'AiForge.Install' {

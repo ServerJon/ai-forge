@@ -30,7 +30,8 @@ function New-AiForgeInstallContext {
         [Parameter(Mandatory)][pscustomobject] $Config,
         [Parameter(Mandatory)][pscustomobject] $Selection,
         [bool] $DryRun = $false,
-        [bool] $AssumeYes = $false
+        [bool] $AssumeYes = $false,
+        [bool] $InstallDeps = $false
     )
 
     [pscustomobject]@{
@@ -39,6 +40,7 @@ function New-AiForgeInstallContext {
         Selection       = $Selection
         DryRun          = $DryRun
         AssumeYes       = $AssumeYes
+        InstallDeps     = $InstallDeps
         InstalledSkills = [System.Collections.Generic.List[string]]::new()
         InstalledAgents = [System.Collections.Generic.List[string]]::new()
         InstalledRemote = [System.Collections.Generic.List[object]]::new()

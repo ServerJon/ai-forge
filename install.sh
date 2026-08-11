@@ -12,7 +12,9 @@
 #     helper commands.
 #   * Resolves dependencies, skips already-installed items, copies the
 #     selected SKILL.md / agent files into the project's .agents/ folder,
-#     drops a pre-filled AGENTS.md, and prints a summary with next steps.
+#     drops a pre-filled AGENTS.md, optionally installs curated missing CLIs
+#     (--install-deps or an end-of-run prompt; nvm/pyenv + project PM aware),
+#     and prints a summary with next steps.
 #
 # Compatible with Bash 3.2 (default macOS shell) -- no associative arrays,
 # no mapfile.
@@ -161,12 +163,13 @@ EXTRA_PROJECT=""
 ASSUME_YES=0
 DRY_RUN=0
 LIST_ALL=0
+INSTALL_DEPS=0
 
 usage() {
   cat <<EOF
 ${C_BOLD}ai-forge installer${C_RESET}
 
-Usage: ./install.sh -p <project-path> [-e <extra-project>] [-a] [-y] [--dry-run]
+Usage: ./install.sh -p <project-path> [-e <extra-project>] [-a] [-y] [-d] [--dry-run]
 
   -p <path>       Target project path where skills/agents are installed.
   -e, --extra <p> Extra project to layer on top of ai-forge. Its skills/agents are
@@ -177,6 +180,11 @@ Usage: ./install.sh -p <project-path> [-e <extra-project>] [-a] [-y] [--dry-run]
                   needed). Remote installs and helper commands are NOT auto-run.
                   Combine with -y for fully unattended installs and -n for CI checks.
   -y              Assume "yes" for confirmation prompts.
+  -d, --install-deps
+                  After installing skills/agents, try to install missing external
+                  CLI dependencies (curated recipes only). Without this flag an
+                  interactive run still asks once at the end when something is
+                  missing. -y alone does NOT imply -d.
   -n, --dry-run   Preview the actions without writing anything or running commands.
   -h              Show this help.
 EOF
@@ -190,6 +198,7 @@ while [ $# -gt 0 ]; do
     -e=*|--extra=*) EXTRA_PROJECT="${1#*=}"; shift ;;
     -a|--list-all) LIST_ALL=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
+    -d|--install-deps) INSTALL_DEPS=1; shift ;;
     -n|--dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown argument: $1 (use -h for help)" ;;
@@ -267,6 +276,166 @@ fi
 
 SKILLS_DEST="${PROJECT_PATH}/.agents/skills"
 AGENTS_DEST="${PROJECT_PATH}/.agents/agents"
+
+# -----------------------------------------------------------------------------
+# 1c. Project runtime (nvm / pyenv) + Node package manager detection
+# -----------------------------------------------------------------------------
+# Skills often need CLIs installed for a specific Node/Python version. When the
+# target pins one via .nvmrc / .node-version / .python-version / .pyenv, prefer
+# that toolchain for availability checks and dependency installs. If the pinned
+# version (or the version manager) is missing, fall back to the ambient PATH.
+#
+# NODE_PM picks the project's package manager (pnpm/yarn/bun/npm) so global and
+# project-scoped Node installs follow local convention instead of always npm.
+
+NODE_PM="npm"
+RUNTIME_PATH_PREFIX=""
+NODE_VERSION_LABEL=""
+PYTHON_VERSION_LABEL=""
+
+# Read a single trimmed line from a version pin file (ignores blanks/comments).
+read_version_pin() {
+  local file="$1" line
+  [ -f "$file" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    case "$line" in ""|\#*) continue ;; esac
+    printf '%s' "$line"
+    return 0
+  done < "$file"
+  return 1
+}
+
+# Prepend a directory to RUNTIME_PATH_PREFIX when it exists and is not already in.
+prepend_runtime_path() {
+  local dir="$1"
+  [ -n "$dir" ] && [ -d "$dir" ] || return 0
+  case ":${RUNTIME_PATH_PREFIX}:" in
+    *":${dir}:"*) return 0 ;;
+  esac
+  RUNTIME_PATH_PREFIX="${dir}${RUNTIME_PATH_PREFIX:+:}${RUNTIME_PATH_PREFIX}"
+}
+
+# Detect the Node package manager for the target project.
+detect_node_package_manager() {
+  local project="$1" pm_field=""
+  NODE_PM="npm"
+
+  if [ -f "${project}/pnpm-lock.yaml" ]; then NODE_PM="pnpm"; return 0; fi
+  if [ -f "${project}/yarn.lock" ]; then NODE_PM="yarn"; return 0; fi
+  if [ -f "${project}/bun.lockb" ] || [ -f "${project}/bun.lock" ]; then NODE_PM="bun"; return 0; fi
+  if [ -f "${project}/package-lock.json" ]; then NODE_PM="npm"; return 0; fi
+
+  if [ -f "${project}/package.json" ]; then
+    pm_field="$(grep -E '"packageManager"[[:space:]]*:' "${project}/package.json" 2>/dev/null | head -n 1 || true)"
+    case "$pm_field" in
+      *pnpm*) NODE_PM="pnpm"; return 0 ;;
+      *yarn*) NODE_PM="yarn"; return 0 ;;
+      *bun*)  NODE_PM="bun"; return 0 ;;
+      *npm*)  NODE_PM="npm"; return 0 ;;
+    esac
+  fi
+}
+
+# Try to activate the Node version pinned by the project (nvm).
+try_activate_project_node() {
+  local project="$1" pin_file="" ver="" node_bin="" npm_gbin=""
+  if [ -f "${project}/.nvmrc" ]; then
+    pin_file="${project}/.nvmrc"
+  elif [ -f "${project}/.node-version" ]; then
+    pin_file="${project}/.node-version"
+  else
+    return 1
+  fi
+
+  ver="$(read_version_pin "$pin_file")" || return 1
+  NODE_VERSION_LABEL="${ver} ($(basename "$pin_file"))"
+
+  export NVM_DIR="${NVM_DIR:-${HOME}/.nvm}"
+  if [ ! -s "${NVM_DIR}/nvm.sh" ]; then
+    warn "Project pins Node ${ver} via $(basename "$pin_file") but nvm was not found; using the current PATH."
+    return 1
+  fi
+
+  # shellcheck disable=SC1090
+  . "${NVM_DIR}/nvm.sh"
+  if ! nvm use "$ver" >/dev/null 2>&1; then
+    warn "Project pins Node ${ver} via $(basename "$pin_file") but that version is not installed in nvm; using the current PATH."
+    return 1
+  fi
+
+  node_bin="$(command -v node 2>/dev/null || true)"
+  [ -n "$node_bin" ] && prepend_runtime_path "$(dirname "$node_bin")"
+  # Global CLI bin dir for the active Node (npm/pnpm/yarn share this prefix).
+  npm_gbin="$(npm prefix -g 2>/dev/null || true)"
+  [ -n "$npm_gbin" ] && prepend_runtime_path "${npm_gbin}/bin"
+  npm_gbin="$(npm bin -g 2>/dev/null || true)"
+  [ -n "$npm_gbin" ] && prepend_runtime_path "$npm_gbin"
+  ok "Using Node ${ver} from nvm for dependency checks/installs."
+  return 0
+}
+
+# Try to activate the Python version pinned by the project (pyenv).
+try_activate_project_python() {
+  local project="$1" pin_file="" ver="" py_bin=""
+  if [ -f "${project}/.python-version" ]; then
+    pin_file="${project}/.python-version"
+  elif [ -f "${project}/.pyenv" ]; then
+    pin_file="${project}/.pyenv"
+  else
+    return 1
+  fi
+
+  ver="$(read_version_pin "$pin_file")" || return 1
+  PYTHON_VERSION_LABEL="${ver} ($(basename "$pin_file"))"
+
+  if ! command -v pyenv >/dev/null 2>&1; then
+    warn "Project pins Python ${ver} via $(basename "$pin_file") but pyenv was not found; using the current PATH."
+    return 1
+  fi
+
+  py_bin="$(PYENV_VERSION="$ver" pyenv which python 2>/dev/null || \
+            PYENV_VERSION="$ver" pyenv which python3 2>/dev/null || true)"
+  if [ -z "$py_bin" ] || [ ! -x "$py_bin" ]; then
+    warn "Project pins Python ${ver} via $(basename "$pin_file") but that version is not installed in pyenv; using the current PATH."
+    return 1
+  fi
+
+  prepend_runtime_path "$(dirname "$py_bin")"
+  ok "Using Python ${ver} from pyenv for dependency checks/installs."
+  return 0
+}
+
+prepare_project_runtime() {
+  detect_node_package_manager "$PROJECT_PATH"
+  try_activate_project_node "$PROJECT_PATH" || true
+  try_activate_project_python "$PROJECT_PATH" || true
+
+  if [ -f "${PROJECT_PATH}/package.json" ] || [ "$NODE_PM" != "npm" ]; then
+    info "Node package manager for this project: ${C_BOLD}${NODE_PM}${C_RESET}"
+  fi
+}
+
+# Resolve a binary on the project-aware PATH (pinned runtimes first, then ambient).
+project_command_path() {
+  local name="$1"
+  PATH="${RUNTIME_PATH_PREFIX}${RUNTIME_PATH_PREFIX:+:}${PATH}" command -v "$name" 2>/dev/null || true
+}
+
+project_has_command() {
+  local found
+  found="$(project_command_path "$1")"
+  [ -n "$found" ]
+}
+
+# Run a command with the project-aware PATH (and cwd = project).
+run_in_project_env() {
+  ( cd "$PROJECT_PATH" && PATH="${RUNTIME_PATH_PREFIX}${RUNTIME_PATH_PREFIX:+:}${PATH}" "$@" )
+}
+
+prepare_project_runtime
 
 # -----------------------------------------------------------------------------
 # Helpers to detect "already installed" items
@@ -720,8 +889,9 @@ check_dependencies
 # 5b. External command (system tool) dependencies
 # -----------------------------------------------------------------------------
 # Maps a selected item to the external CLI command(s) it expects to be on the
-# PATH. These are reported in the summary table only -- this installer never
-# installs system tools (out of scope).
+# PATH. Availability is checked against the project-aware PATH (nvm/pyenv pins
+# first). Installation is opt-in via --install-deps or an end-of-run prompt;
+# only curated recipes below are auto-runnable.
 #
 # Key format:
 #   * skills / readme skills -> "<subfolder>/<name>"
@@ -745,29 +915,57 @@ cmd_deps_for() {
   esac
 }
 
+# Curated install recipes for individual binaries (not "a|b" tokens).
+# Prints: <kind>|<payload>
+#   node-global|<npm package>   install with the project's Node PM (-g)
+#   python-pip|<pip package>    install with the active python -m pip
+#   brew|<formula>              brew install (macOS/Linuxbrew) when brew exists
+#   hint|<human text>           print guidance only (never auto-run)
+# Empty output => no recipe (report only).
+cmd_install_recipe() {
+  case "$1" in
+    ctx7)            echo "node-global|ctx7" ;;
+    playwright-cli)  echo "node-global|@playwright/cli" ;;
+    playwright)      echo "node-global|@playwright/cli" ;;
+    pytest)          echo "python-pip|pytest" ;;
+    alembic)         echo "python-pip|alembic" ;;
+    gh)              echo "brew|gh" ;;
+    glab)            echo "brew|glab" ;;
+    git)             echo "hint|Install Git from https://git-scm.com/downloads" ;;
+    python3|python)  echo "hint|Install Python via pyenv (pyenv install <ver>) or https://python.org" ;;
+    poetry)          echo "hint|Install Poetry: https://python-poetry.org/docs/#installation" ;;
+    uv)              echo "hint|Install uv: https://docs.astral.sh/uv/getting-started/installation/" ;;
+    pdm)             echo "hint|Install PDM: https://pdm-project.org/en/latest/#installation" ;;
+    *)               echo "" ;;
+  esac
+}
+
 # Parallel arrays holding the rendered dependency table rows.
 DEP_ROW_ITEM=()
 DEP_ROW_REQ=()
+DEP_ROW_TOKEN=()  # original token (may contain "|")
 DEP_ROW_OK=()       # 1 = available, 0 = missing
 DEP_ROW_FOUND=()    # which concrete binary satisfied the requirement
 DEP_MISSING_COUNT=0
 
 # Resolve a single token (possibly "a|b|c") into requirement display + status.
-# Sets the RT_* globals.
+# Sets the RT_* globals. Uses the project-aware PATH.
 resolve_token() {
   local tok="$1" alt found=""
   case "$tok" in
     *"|"*)
       local OLD_IFS="$IFS"; IFS='|'
       for alt in $tok; do
-        if command -v "$alt" >/dev/null 2>&1; then found="$alt"; break; fi
+        found="$(project_command_path "$alt")"
+        [ -n "$found" ] && { found="$alt"; break; }
       done
       IFS="$OLD_IFS"
       RT_REQ="${tok//|/ or }"
       ;;
     *)
       RT_REQ="$tok"
-      command -v "$tok" >/dev/null 2>&1 && found="$tok"
+      found="$(project_command_path "$tok")"
+      [ -n "$found" ] && found="$tok" || found=""
       ;;
   esac
   if [ -n "$found" ]; then RT_OK=1; RT_FOUND="$found"; else RT_OK=0; RT_FOUND=""; fi
@@ -781,6 +979,7 @@ add_dependency_rows() {
     resolve_token "$t"
     DEP_ROW_ITEM+=("$label")
     DEP_ROW_REQ+=("$RT_REQ")
+    DEP_ROW_TOKEN+=("$t")
     DEP_ROW_OK+=("$RT_OK")
     DEP_ROW_FOUND+=("$RT_FOUND")
     [ "$RT_OK" -eq 0 ] && DEP_MISSING_COUNT=$(( DEP_MISSING_COUNT + 1 ))
@@ -789,6 +988,8 @@ add_dependency_rows() {
 
 build_dependency_table() {
   local i
+  DEP_ROW_ITEM=(); DEP_ROW_REQ=(); DEP_ROW_TOKEN=(); DEP_ROW_OK=(); DEP_ROW_FOUND=()
+  DEP_MISSING_COUNT=0
   for i in "${!SEL_SKILL_NAME[@]}"; do
     [ -n "${SEL_SKILL_NAME[$i]:-}" ] || continue
     add_dependency_rows "${SEL_SKILL_NAME[$i]}" "$(cmd_deps_for "${SEL_SKILL_SUB[$i]}/${SEL_SKILL_NAME[$i]}")"
@@ -814,7 +1015,10 @@ print_dependency_table() {
   done
 
   printf '\n%s\n' "${C_BOLD}External command dependencies:${C_RESET}"
-  printf '%s\n'   "${C_DIM}(not installed by this script — install any missing tools yourself)${C_RESET}"
+  if [ -n "$NODE_VERSION_LABEL" ] || [ -n "$PYTHON_VERSION_LABEL" ]; then
+    printf '%s\n' "${C_DIM}(checked against project runtime${NODE_VERSION_LABEL:+; Node $NODE_VERSION_LABEL}${PYTHON_VERSION_LABEL:+; Python $PYTHON_VERSION_LABEL})${C_RESET}"
+  fi
+  printf '%s\n'   "${C_DIM}(use --install-deps or confirm the prompt below to install curated missing tools)${C_RESET}"
   printf '  %-*s  %-*s  %s\n' "$w_item" "Item" "$w_req" "Command" "Status"
   printf '  %-*s  %-*s  %s\n' "$w_item" "$(printf '%.0s-' $(seq 1 "$w_item"))" \
                               "$w_req"  "$(printf '%.0s-' $(seq 1 "$w_req"))"  "------"
@@ -950,6 +1154,213 @@ print_mcp_table() {
 }
 
 build_mcp_table
+
+# -----------------------------------------------------------------------------
+# 5d. Optional install of missing external command dependencies
+# -----------------------------------------------------------------------------
+# Collect unique missing tokens (preserving "a|b" groups) from the dep table.
+collect_missing_dep_tokens() {
+  local i t seen=" "
+  MISSING_DEP_TOKENS=()
+  for i in "${!DEP_ROW_OK[@]}"; do
+    [ "${DEP_ROW_OK[$i]}" -eq 0 ] || continue
+    t="${DEP_ROW_TOKEN[$i]}"
+    case "$seen" in *" ${t} "*) continue ;; esac
+    seen="${seen}${t} "
+    MISSING_DEP_TOKENS+=("$t")
+  done
+}
+
+# Pick which concrete binary to install for a token (possibly "a|b").
+# Prefers the first alternative that has a non-hint recipe.
+pick_install_candidate() {
+  local tok="$1" alt recipe kind
+  case "$tok" in
+    *"|"*)
+      local OLD_IFS="$IFS"; IFS='|'
+      for alt in $tok; do
+        if project_has_command "$alt"; then
+          IFS="$OLD_IFS"
+          PICKED_CMD=""; return 1
+        fi
+      done
+      for alt in $tok; do
+        recipe="$(cmd_install_recipe "$alt")"
+        kind="${recipe%%|*}"
+        if [ -n "$recipe" ] && [ "$kind" != "hint" ]; then
+          IFS="$OLD_IFS"
+          PICKED_CMD="$alt"
+          return 0
+        fi
+      done
+      # Fall back to first alt so we can still print a hint.
+      set -- $tok
+      PICKED_CMD="$1"
+      IFS="$OLD_IFS"
+      return 0
+      ;;
+    *)
+      if project_has_command "$tok"; then PICKED_CMD=""; return 1; fi
+      PICKED_CMD="$tok"
+      return 0
+      ;;
+  esac
+}
+
+# Build argv for a node-global install using the given package manager.
+# Sets NG_ARGS array.
+node_global_install_args() {
+  local pkg="$1" pm="${2:-$NODE_PM}"
+  NG_ARGS=()
+  case "$pm" in
+    pnpm)
+      NG_ARGS=(pnpm add -g "$pkg") ;;
+    yarn)
+      NG_ARGS=(yarn global add "$pkg") ;;
+    bun)
+      NG_ARGS=(bun add -g "$pkg") ;;
+    *)
+      NG_ARGS=(npm install -g "$pkg") ;;
+  esac
+}
+
+# Render a shell-safe display string for an argv list.
+render_argv() {
+  local rendered="" quoted arg
+  for arg in "$@"; do
+    printf -v quoted '%q' "$arg"
+    rendered="${rendered}${rendered:+ }${quoted}"
+  done
+  printf '%s' "$rendered"
+}
+
+# Install one concrete binary using its curated recipe. Returns 0 on success.
+install_one_dependency() {
+  local cmd="$1"
+  local recipe kind payload py rendered answer pm="$NODE_PM"
+  recipe="$(cmd_install_recipe "$cmd")"
+  if [ -z "$recipe" ]; then
+    warn "No install recipe for '${cmd}' — install it manually."
+    return 1
+  fi
+  kind="${recipe%%|*}"
+  payload="${recipe#*|}"
+
+  case "$kind" in
+    hint)
+      info "Install hint for ${C_BOLD}${cmd}${C_RESET}: ${payload}"
+      return 1
+      ;;
+    node-global)
+      if ! project_has_command node && ! project_has_command npm; then
+        warn "Node.js is required to install '${cmd}' but was not found on PATH."
+        return 1
+      fi
+      # Ensure the chosen PM binary exists; fall back to npm.
+      if ! project_has_command "$pm"; then
+        warn "Package manager '${pm}' not found; falling back to npm for '${cmd}'."
+        pm="npm"
+      fi
+      node_global_install_args "$payload" "$pm"
+      rendered="$(render_argv "${NG_ARGS[@]}")"
+      ;;
+    python-pip)
+      py="$(project_command_path python3)"
+      [ -n "$py" ] || py="$(project_command_path python)"
+      if [ -z "$py" ]; then
+        warn "Python is required to install '${cmd}' but was not found on PATH."
+        return 1
+      fi
+      NG_ARGS=("$py" -m pip install --user "$payload")
+      rendered="$(render_argv "${NG_ARGS[@]}")"
+      ;;
+    brew)
+      if ! command -v brew >/dev/null 2>&1; then
+        warn "'brew' not found — install '${cmd}' manually (e.g. from the vendor docs)."
+        return 1
+      fi
+      NG_ARGS=(brew install "$payload")
+      rendered="$(render_argv "${NG_ARGS[@]}")"
+      ;;
+    *)
+      warn "Unknown install kind '${kind}' for '${cmd}'."
+      return 1
+      ;;
+  esac
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    dry "Would install dependency '${cmd}': ${rendered}"
+    RAN_COMMANDS+=("dep:${cmd}: ${rendered} (skipped: dry-run)")
+    return 0
+  fi
+
+  info "Install command for '${cmd}': ${C_BOLD}${rendered}${C_RESET}"
+  if [ "$ASSUME_YES" -eq 0 ]; then
+    printf '%s' "${C_YELLOW}Run this install command? [y/N]${C_RESET} "
+    IFS= read -r answer
+    case "$answer" in
+      y|Y|yes|YES) ;;
+      *)
+        warn "Skipped install for '${cmd}'."
+        RAN_COMMANDS+=("dep:${cmd}: ${rendered} (skipped: not confirmed)")
+        return 1
+        ;;
+    esac
+  fi
+
+  if run_in_project_env "${NG_ARGS[@]}"; then
+    ok "Installed dependency: ${cmd}"
+    RAN_COMMANDS+=("dep:${cmd}: ${rendered}")
+    return 0
+  fi
+  warn "Install command failed for '${cmd}'."
+  return 1
+}
+
+# Ask / run installs for every unique missing dependency token.
+maybe_install_missing_dependencies() {
+  local i tok candidate do_install=0 ans="n" any_attempt=0
+
+  [ "$DEP_MISSING_COUNT" -gt 0 ] || return 0
+  collect_missing_dep_tokens
+  [ "${#MISSING_DEP_TOKENS[@]}" -gt 0 ] || return 0
+
+  if [ "$INSTALL_DEPS" -eq 1 ]; then
+    do_install=1
+  elif [ "$DRY_RUN" -eq 1 ]; then
+    return 0
+  elif [ -t 0 ] && [ "$ASSUME_YES" -eq 0 ]; then
+    printf '\n%s' "${C_YELLOW}Install missing dependencies now (curated recipes only)? [y/N]${C_RESET} "
+    IFS= read -r ans
+    case "$ans" in y|Y|yes|YES) do_install=1 ;; esac
+  else
+    # Non-interactive / -y without -d: report only (do not hang CI on a prompt).
+    if [ "$ASSUME_YES" -eq 1 ]; then
+      info "Missing dependencies detected. Re-run with ${C_BOLD}--install-deps${C_RESET} to install curated tools (${C_BOLD}-y${C_RESET} alone does not install them)."
+    else
+      info "Missing dependencies detected. Re-run with ${C_BOLD}--install-deps${C_RESET} (and ${C_BOLD}-y${C_RESET} if unattended) to install curated tools."
+    fi
+    return 0
+  fi
+
+  [ "$do_install" -eq 1 ] || return 0
+
+  printf '\n%s\n' "${C_BOLD}Installing missing dependencies...${C_RESET}"
+  for tok in "${MISSING_DEP_TOKENS[@]}"; do
+    pick_install_candidate "$tok" || continue
+    candidate="$PICKED_CMD"
+    [ -n "$candidate" ] || continue
+    any_attempt=1
+    install_one_dependency "$candidate" || true
+  done
+
+  [ "$any_attempt" -eq 1 ] || return 0
+
+  # Re-scan so the summary reflects anything that just became available.
+  build_dependency_table
+  printf '\n%s\n' "${C_BOLD}Updated dependency status:${C_RESET}"
+  print_dependency_table
+}
 
 # -----------------------------------------------------------------------------
 # 6. Perform the installation
@@ -1386,11 +1797,6 @@ if [ "${#INSTALLED_SKILLS[@]}" -gt 0 ]; then
   for s in "${INSTALLED_SKILLS[@]}"; do printf '  • %s\n' "$s"; done
 fi
 
-if [ "${#RAN_COMMANDS[@]}" -gt 0 ]; then
-  printf '\n%s\n' "${C_BOLD}Commands run:${C_RESET}"
-  for c in "${RAN_COMMANDS[@]}"; do printf '  • %s\n' "$c"; done
-fi
-
 if [ "${#DROP_NAMES[@]}" -gt 0 ]; then
   printf '\n%s\n' "${C_YELLOW}Skipped (unmet dependencies):${C_RESET}"
   for d in "${DROP_NAMES[@]}"; do printf '  • %s\n' "$d"; done
@@ -1401,6 +1807,15 @@ print_dependency_table
 
 # MCP server dependencies (MCP servers the selected items rely on).
 print_mcp_table
+
+# Optionally install curated missing CLIs (--install-deps or interactive prompt).
+# Runs before "Commands run" so successful installs appear in that list.
+maybe_install_missing_dependencies
+
+if [ "${#RAN_COMMANDS[@]}" -gt 0 ]; then
+  printf '\n%s\n' "${C_BOLD}Commands run:${C_RESET}"
+  for c in "${RAN_COMMANDS[@]}"; do printf '  • %s\n' "$c"; done
+fi
 
 # sync-ai recommendation
 if is_skill_selected "sync-ai"; then
