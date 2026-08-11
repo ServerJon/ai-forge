@@ -378,7 +378,7 @@ Private repos: `gh auth login` (folders) or a GitHub token for `curl` (files).
 | `javascript-typescript`  | Jest, Vitest, advanced TypeScript types                                                                     |
 | `playwright`             | E2E testing, CLI automation, web-design review, webapp testing                                              |
 | `python`                 | pytest patterns                                                                                             |
-| `react`                  | React patterns                                                                                              |
+| `react`                  | React component scaffolding (`react-new-component`)                                                         |
 | `sql`                    | Code review, query optimisation                                                                             |
 
 ---
